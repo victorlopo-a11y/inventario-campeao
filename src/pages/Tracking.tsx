@@ -2,12 +2,14 @@ import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import Layout from "@/components/Layout";
 import StatusCard from "@/components/StatusCard";
+import StatusDistributionChart from "@/components/StatusDistributionChart";
+import EquipmentHistoryDialog from "@/components/EquipmentHistoryDialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { Save, Trash2, FileDown, QrCode } from "lucide-react";
+import { Save, Trash2, FileDown, QrCode, Edit, History } from "lucide-react";
 
 interface Equipment {
   id: string;
@@ -37,7 +39,7 @@ interface TrackingRecord {
   delivered_by: string | null;
   received_by: string | null;
   created_at: string;
-  equipment: { name: string };
+  equipment: { name: string; serial_number: string | null; image_url: string | null };
   locations: { name: string } | null;
   sectors: { name: string } | null;
 }
@@ -60,6 +62,8 @@ const Tracking = () => {
   const [receivedBy, setReceivedBy] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [historyDialogOpen, setHistoryDialogOpen] = useState(false);
+  const [selectedHistoryEquipment, setSelectedHistoryEquipment] = useState<{ id: string; name: string } | null>(null);
 
   useEffect(() => {
     fetchData();
@@ -72,7 +76,7 @@ const Tracking = () => {
       supabase.from("sectors").select("*"),
       supabase.from("tracking").select(`
         *,
-        equipment:equipment_id(name),
+        equipment:equipment_id(name, serial_number, image_url),
         locations:location_id(name),
         sectors:sector_id(name)
       `).order("created_at", { ascending: false }),
@@ -122,15 +126,35 @@ const Tracking = () => {
     setReceivedBy("");
   };
 
+  const handleDelete = async (id: string) => {
+    const { error } = await supabase.from("tracking").delete().eq("id", id);
+    
+    if (error) {
+      toast({ title: "Erro", description: error.message, variant: "destructive" });
+    } else {
+      toast({ title: "Sucesso", description: "Registro excluído!" });
+      fetchData();
+    }
+  };
+
+  const handleShowHistory = (equipmentId: string, equipmentName: string) => {
+    setSelectedHistoryEquipment({ id: equipmentId, name: equipmentName });
+    setHistoryDialogOpen(true);
+  };
+
   const handleExportCSV = () => {
-    const headers = ["Equipamento", "Status", "Quantidade", "Localização", "Setor", "Data"];
+    const headers = ["Data/Hora", "Equipamento", "Nº Série", "Status", "Quantidade", "Localização", "Setor", "Responsável", "Quem Entregou", "Quem Recebeu"];
     const rows = filteredRecords.map(r => [
+      new Date(r.created_at).toLocaleString("pt-BR"),
       r.equipment.name,
+      r.equipment.serial_number || "",
       r.status,
       r.quantity,
       r.locations?.name || "",
       r.sectors?.name || "",
-      new Date(r.created_at).toLocaleDateString("pt-BR"),
+      r.responsible_person || "",
+      r.delivered_by || "",
+      r.received_by || "",
     ]);
 
     const csv = [headers, ...rows].map(row => row.join(",")).join("\n");
@@ -140,6 +164,27 @@ const Tracking = () => {
     a.href = url;
     a.download = "rastreamento.csv";
     a.click();
+  };
+
+  const getStatusLabel = (status: string) => {
+    const labels: { [key: string]: string } = {
+      saida: "Saída",
+      manutencao: "Em manutenção",
+      danificado: "Danificado",
+      devolucao: "Devolução",
+    };
+    return labels[status] || status;
+  };
+
+  const formatDate = (date: string) => {
+    return new Date(date).toLocaleString("pt-BR", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    });
   };
 
   const statusCounts = {
@@ -295,6 +340,14 @@ const Tracking = () => {
           </Button>
         </div>
 
+        {/* Status Chart */}
+        <StatusDistributionChart
+          saida={statusCounts.saida}
+          manutencao={statusCounts.manutencao}
+          danificado={statusCounts.danificado}
+          devolucao={statusCounts.devolucao}
+        />
+
         {/* Search and Filter */}
         <div className="space-y-3">
           <Input
@@ -316,18 +369,108 @@ const Tracking = () => {
           </Select>
         </div>
 
-        {/* Records List */}
-        <div className="bg-card rounded-lg p-4 space-y-2">
-          {filteredRecords.map(record => (
-            <div key={record.id} className="border-b pb-2">
-              <div className="font-medium">{record.equipment.name}</div>
-              <div className="text-sm text-muted-foreground">
-                Status: {record.status} | Qtd: {record.quantity} | {new Date(record.created_at).toLocaleDateString("pt-BR")}
-              </div>
-            </div>
-          ))}
+        {/* Records Table */}
+        <div className="bg-card rounded-lg overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full border-collapse">
+              <thead>
+                <tr className="bg-[#2c5282] text-white">
+                  <th className="border border-[#4a5568] p-3 text-left">Imagem</th>
+                  <th className="border border-[#4a5568] p-3 text-left">Data/Hora</th>
+                  <th className="border border-[#4a5568] p-3 text-left">Nome</th>
+                  <th className="border border-[#4a5568] p-3 text-left">Nº de Série</th>
+                  <th className="border border-[#4a5568] p-3 text-left">Status</th>
+                  <th className="border border-[#4a5568] p-3 text-left">Quantidade</th>
+                  <th className="border border-[#4a5568] p-3 text-left">Localização</th>
+                  <th className="border border-[#4a5568] p-3 text-left">Setor</th>
+                  <th className="border border-[#4a5568] p-3 text-left">Responsável</th>
+                  <th className="border border-[#4a5568] p-3 text-left">Quem Entregou</th>
+                  <th className="border border-[#4a5568] p-3 text-left">Quem Recebeu</th>
+                  <th className="border border-[#4a5568] p-3 text-left">Ações</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredRecords.length === 0 ? (
+                  <tr>
+                    <td colSpan={12} className="text-center py-8 text-muted-foreground">
+                      Nenhum registro encontrado
+                    </td>
+                  </tr>
+                ) : (
+                  filteredRecords.map((record) => (
+                    <tr key={record.id} className="hover:bg-muted/50">
+                      <td className="border border-border p-3">
+                        {record.equipment.image_url ? (
+                          <img src={record.equipment.image_url} alt="" className="w-10 h-10 object-cover rounded" />
+                        ) : (
+                          <div className="w-10 h-10 bg-muted rounded flex items-center justify-center text-xs">
+                            -
+                          </div>
+                        )}
+                      </td>
+                      <td className="border border-border p-3 whitespace-nowrap">{formatDate(record.created_at)}</td>
+                      <td className="border border-border p-3">{record.equipment.name}</td>
+                      <td className="border border-border p-3">{record.equipment.serial_number || "-"}</td>
+                      <td className="border border-border p-3">
+                        <span className={`inline-block px-2 py-1 rounded text-sm ${
+                          record.status === "saida" ? "bg-blue-500 text-white" :
+                          record.status === "manutencao" ? "bg-amber-600 text-white" :
+                          record.status === "danificado" ? "bg-red-500 text-white" :
+                          "bg-yellow-500 text-white"
+                        }`}>
+                          {getStatusLabel(record.status)}
+                        </span>
+                      </td>
+                      <td className="border border-border p-3">{record.quantity}</td>
+                      <td className="border border-border p-3">{record.locations?.name || "-"}</td>
+                      <td className="border border-border p-3">{record.sectors?.name || "-"}</td>
+                      <td className="border border-border p-3">{record.responsible_person || "-"}</td>
+                      <td className="border border-border p-3">{record.delivered_by || "-"}</td>
+                      <td className="border border-border p-3">{record.received_by || "-"}</td>
+                      <td className="border border-border p-3">
+                        <div className="flex flex-col gap-2">
+                          <Button size="sm" variant="default" className="w-full">
+                            <Edit className="h-3 w-3 mr-1" />
+                            Editar
+                          </Button>
+                          <Button 
+                            size="sm" 
+                            variant="destructive" 
+                            className="w-full"
+                            onClick={() => handleDelete(record.id)}
+                          >
+                            <Trash2 className="h-3 w-3 mr-1" />
+                            Excluir
+                          </Button>
+                          <Button 
+                            size="sm" 
+                            variant="secondary" 
+                            className="w-full"
+                            onClick={() => handleShowHistory(record.equipment_id, record.equipment.name)}
+                          >
+                            <History className="h-3 w-3 mr-1" />
+                            Histórico
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
+
+      <EquipmentHistoryDialog
+        equipmentId={selectedHistoryEquipment?.id || null}
+        equipmentName={selectedHistoryEquipment?.name || ""}
+        open={historyDialogOpen}
+        onClose={() => {
+          setHistoryDialogOpen(false);
+          setSelectedHistoryEquipment(null);
+        }}
+      />
     </Layout>
   );
 };
