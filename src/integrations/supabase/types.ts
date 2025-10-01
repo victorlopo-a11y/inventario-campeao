@@ -37,34 +37,40 @@ export type Database = {
           available_quantity: number
           category_id: string | null
           created_at: string
+          created_by: string | null
           description: string | null
           id: string
           image_url: string | null
           name: string
           serial_number: string | null
           updated_at: string
+          updated_by: string | null
         }
         Insert: {
           available_quantity?: number
           category_id?: string | null
           created_at?: string
+          created_by?: string | null
           description?: string | null
           id?: string
           image_url?: string | null
           name: string
           serial_number?: string | null
           updated_at?: string
+          updated_by?: string | null
         }
         Update: {
           available_quantity?: number
           category_id?: string | null
           created_at?: string
+          created_by?: string | null
           description?: string | null
           id?: string
           image_url?: string | null
           name?: string
           serial_number?: string | null
           updated_at?: string
+          updated_by?: string | null
         }
         Relationships: [
           {
@@ -72,6 +78,20 @@ export type Database = {
             columns: ["category_id"]
             isOneToOne: false
             referencedRelation: "categories"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "equipment_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "equipment_updated_by_fkey"
+            columns: ["updated_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
             referencedColumns: ["id"]
           },
         ]
@@ -91,6 +111,62 @@ export type Database = {
           created_at?: string
           id?: string
           name?: string
+        }
+        Relationships: []
+      }
+      notifications: {
+        Row: {
+          created_at: string | null
+          equipment_id: string | null
+          id: string
+          message: string
+          read: boolean | null
+          sent_to_role: Database["public"]["Enums"]["app_role"]
+        }
+        Insert: {
+          created_at?: string | null
+          equipment_id?: string | null
+          id?: string
+          message: string
+          read?: boolean | null
+          sent_to_role: Database["public"]["Enums"]["app_role"]
+        }
+        Update: {
+          created_at?: string | null
+          equipment_id?: string | null
+          id?: string
+          message?: string
+          read?: boolean | null
+          sent_to_role?: Database["public"]["Enums"]["app_role"]
+        }
+        Relationships: [
+          {
+            foreignKeyName: "notifications_equipment_id_fkey"
+            columns: ["equipment_id"]
+            isOneToOne: false
+            referencedRelation: "equipment"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      profiles: {
+        Row: {
+          created_at: string | null
+          email: string | null
+          id: string
+          updated_at: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          email?: string | null
+          id: string
+          updated_at?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          email?: string | null
+          id?: string
+          updated_at?: string | null
         }
         Relationships: []
       }
@@ -115,6 +191,7 @@ export type Database = {
       tracking: {
         Row: {
           created_at: string
+          created_by: string | null
           delivered_by: string | null
           entry_type: string | null
           equipment_id: string
@@ -127,9 +204,11 @@ export type Database = {
           sector_id: string | null
           status: string
           updated_at: string
+          updated_by: string | null
         }
         Insert: {
           created_at?: string
+          created_by?: string | null
           delivered_by?: string | null
           entry_type?: string | null
           equipment_id: string
@@ -142,9 +221,11 @@ export type Database = {
           sector_id?: string | null
           status: string
           updated_at?: string
+          updated_by?: string | null
         }
         Update: {
           created_at?: string
+          created_by?: string | null
           delivered_by?: string | null
           entry_type?: string | null
           equipment_id?: string
@@ -157,8 +238,16 @@ export type Database = {
           sector_id?: string | null
           status?: string
           updated_at?: string
+          updated_by?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "tracking_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "tracking_equipment_id_fkey"
             columns: ["equipment_id"]
@@ -180,6 +269,42 @@ export type Database = {
             referencedRelation: "sectors"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "tracking_updated_by_fkey"
+            columns: ["updated_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      user_roles: {
+        Row: {
+          created_at: string | null
+          id: string
+          role: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string
+          role?: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          role?: Database["public"]["Enums"]["app_role"]
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "user_roles_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
         ]
       }
     }
@@ -187,10 +312,16 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      has_role: {
+        Args: {
+          _role: Database["public"]["Enums"]["app_role"]
+          _user_id: string
+        }
+        Returns: boolean
+      }
     }
     Enums: {
-      [_ in never]: never
+      app_role: "leitor" | "editor" | "desenvolvedor"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -317,6 +448,8 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {},
+    Enums: {
+      app_role: ["leitor", "editor", "desenvolvedor"],
+    },
   },
 } as const

@@ -212,8 +212,6 @@ const Tracking = () => {
           <StatusCard label="Danificado" count={statusCounts.danificado} variant="danger" />
           <StatusCard label="Devolução" count={statusCounts.devolucao} variant="success" />
         </div>
-
-        {/* Form */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           <div className="space-y-2">
             <Label>Equipamento</Label>
@@ -340,14 +338,6 @@ const Tracking = () => {
           </Button>
         </div>
 
-        {/* Status Chart */}
-        <StatusDistributionChart
-          saida={statusCounts.saida}
-          manutencao={statusCounts.manutencao}
-          danificado={statusCounts.danificado}
-          devolucao={statusCounts.devolucao}
-        />
-
         {/* Search and Filter */}
         <div className="space-y-3">
           <Input
@@ -460,6 +450,14 @@ const Tracking = () => {
             </table>
           </div>
         </div>
+
+        {/* Status Chart - Moved below the table */}
+        <StatusDistributionChart
+          saida={statusCounts.saida}
+          manutencao={statusCounts.manutencao}
+          danificado={statusCounts.danificado}
+          devolucao={statusCounts.devolucao}
+        />
       </div>
 
       <EquipmentHistoryDialog

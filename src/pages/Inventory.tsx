@@ -6,8 +6,14 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Badge } from "@/components/ui/badge";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useToast } from "@/hooks/use-toast";
-import { Save, Trash2, FileDown, Edit, Trash } from "lucide-react";
+import { useUserRole } from "@/hooks/useUserRole";
+import { LowStockNotifications } from "@/components/LowStockNotifications";
+import { AuditLog } from "@/components/AuditLog";
+import { UserManagement } from "@/components/UserManagement";
+import { Save, Trash2, FileDown, Edit, Trash, AlertTriangle } from "lucide-react";
 
 interface Category {
   id: string;
@@ -27,6 +33,7 @@ interface EquipmentData {
 
 const Inventory = () => {
   const { toast } = useToast();
+  const { canEdit, isDeveloper, loading: roleLoading } = useUserRole();
   const [categories, setCategories] = useState<Category[]>([]);
   const [equipment, setEquipment] = useState<EquipmentData[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -57,17 +64,25 @@ const Inventory = () => {
   };
 
   const handleSave = async () => {
+    if (!canEdit) {
+      toast({ title: "Erro", description: "Você não tem permissão para editar", variant: "destructive" });
+      return;
+    }
+
     if (!name) {
       toast({ title: "Erro", description: "Nome do equipamento é obrigatório", variant: "destructive" });
       return;
     }
 
+    const { data: { user } } = await supabase.auth.getUser();
+    
     const data = {
       name,
       serial_number: serialNumber || null,
       category_id: selectedCategory || null,
       available_quantity: parseInt(quantity),
       description: description || null,
+      ...(editingId ? { updated_by: user?.id } : { created_by: user?.id }),
     };
 
     let error;
@@ -78,7 +93,11 @@ const Inventory = () => {
     }
 
     if (error) {
-      toast({ title: "Erro", description: error.message, variant: "destructive" });
+      if (error.code === '23505') {
+        toast({ title: "Erro", description: "Este número de série já está cadastrado", variant: "destructive" });
+      } else {
+        toast({ title: "Erro", description: error.message, variant: "destructive" });
+      }
     } else {
       toast({ title: "Sucesso", description: editingId ? "Equipamento atualizado!" : "Equipamento cadastrado!" });
       handleClear();
@@ -96,6 +115,10 @@ const Inventory = () => {
   };
 
   const handleEdit = (equip: EquipmentData) => {
+    if (!canEdit) {
+      toast({ title: "Erro", description: "Você não tem permissão para editar", variant: "destructive" });
+      return;
+    }
     setName(equip.name);
     setSerialNumber(equip.serial_number || "");
     setSelectedCategory(equip.category_id || "");
@@ -106,6 +129,11 @@ const Inventory = () => {
   };
 
   const handleDelete = async (id: string) => {
+    if (!canEdit) {
+      toast({ title: "Erro", description: "Você não tem permissão para excluir", variant: "destructive" });
+      return;
+    }
+
     if (!confirm("Tem certeza que deseja excluir este equipamento?")) return;
 
     const { error } = await supabase.from("equipment").delete().eq("id", id);
@@ -142,19 +170,42 @@ const Inventory = () => {
     return matchesSearch && matchesCategory;
   });
 
+  const lowStockItems = equipment.filter(e => e.available_quantity <= 5);
+
+  if (roleLoading) {
+    return <Layout><div>Carregando...</div></Layout>;
+  }
+
   return (
     <Layout>
       <div className="space-y-6">
         <h1 className="text-3xl font-bold text-center">Inventário de Equipamentos</h1>
 
+        {/* Low Stock Alert for Editors */}
+        {canEdit && lowStockItems.length > 0 && (
+          <Alert variant="destructive">
+            <AlertTriangle className="h-4 w-4" />
+            <AlertDescription>
+              <strong>Alerta de Estoque Baixo:</strong> {lowStockItems.length} item(ns) com 5 ou menos unidades
+            </AlertDescription>
+          </Alert>
+        )}
+
+        {/* Low Stock Notifications */}
+        {canEdit && <LowStockNotifications />}
+
+        {/* User Management (Developers Only) */}
+        {isDeveloper && <UserManagement />}
+
         {/* Form */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           <div className="space-y-2">
             <Label>Nome do Equipamento</Label>
             <Input
               value={name}
               onChange={e => setName(e.target.value)}
               placeholder="Nome do Equipamento"
+              disabled={!canEdit}
             />
           </div>
 
@@ -164,12 +215,13 @@ const Inventory = () => {
               value={serialNumber}
               onChange={e => setSerialNumber(e.target.value)}
               placeholder="Nº de Série"
+              disabled={!canEdit}
             />
           </div>
 
           <div className="space-y-2">
             <Label>Categoria</Label>
-            <Select value={selectedCategory} onValueChange={setSelectedCategory}>
+            <Select value={selectedCategory} onValueChange={setSelectedCategory} disabled={!canEdit}>
               <SelectTrigger>
                 <SelectValue placeholder="Selecione uma categoria" />
               </SelectTrigger>
@@ -188,87 +240,115 @@ const Inventory = () => {
               value={quantity}
               onChange={e => setQuantity(e.target.value)}
               min="0"
+              disabled={!canEdit}
             />
           </div>
 
-          <div className="space-y-2 md:col-span-2">
+          <div className="space-y-2 md:col-span-2 lg:col-span-4">
             <Label>Descrição (opcional)</Label>
             <Input
               value={description}
               onChange={e => setDescription(e.target.value)}
               placeholder="Descrição (opcional)"
+              disabled={!canEdit}
             />
           </div>
         </div>
 
+        {/* File Upload */}
+        {canEdit && (
+          <div className="space-y-2">
+            <Label>Escolher arquivo</Label>
+            <Input type="file" accept="image/*" disabled />
+            <p className="text-xs text-muted-foreground">Nenhum arquivo selecionado</p>
+          </div>
+        )}
+
         {/* Action Buttons */}
         <div className="space-y-3">
-          <Button onClick={handleSave} className="w-full py-6 text-base">
+          <Button onClick={handleSave} className="w-full py-6 text-base" disabled={!canEdit}>
             <Save className="mr-2 h-5 w-5" />
             Salvar
           </Button>
-          <Button onClick={handleClear} variant="secondary" className="w-full py-6 text-base">
+          <Button onClick={handleClear} variant="secondary" className="w-full py-6 text-base" disabled={!canEdit}>
             <Trash2 className="mr-2 h-5 w-5" />
             Limpar
           </Button>
-          {editingId && (
-            <Button onClick={() => setEditingId(null)} variant="outline" className="w-full py-6 text-base">
-              Cancelar Edição
-            </Button>
-          )}
           <Button onClick={handleExportCSV} variant="secondary" className="w-full py-6 text-base">
             <FileDown className="mr-2 h-5 w-5" />
             Exportar CSV
           </Button>
+          <Button variant="secondary" className="w-full py-6 text-base" disabled>
+            <FileDown className="mr-2 h-5 w-5" />
+            Exportar PDF
+          </Button>
         </div>
 
-        {/* Search and Filter */}
-        <div className="space-y-3">
-          <Input
-            placeholder="🔍 Buscar por nome..."
-            value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
-          />
-          <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Todas as Categorias</SelectItem>
-              {categories.map(c => (
-                <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+        {/* Search */}
+        <Input
+          placeholder="🔍 Buscar por nome..."
+          value={searchQuery}
+          onChange={e => setSearchQuery(e.target.value)}
+        />
+
+        {/* Category Filter */}
+        <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Todas as Categorias</SelectItem>
+            {categories.map(c => (
+              <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
 
         {/* Equipment Table */}
         <div className="bg-card rounded-lg overflow-hidden border">
           <Table>
             <TableHeader>
-              <TableRow className="bg-primary text-primary-foreground hover:bg-primary">
-                <TableHead className="text-primary-foreground">Nome</TableHead>
-                <TableHead className="text-primary-foreground">Nº de Série</TableHead>
-                <TableHead className="text-primary-foreground">Categoria</TableHead>
-                <TableHead className="text-primary-foreground">Quantidade</TableHead>
-                <TableHead className="text-primary-foreground">Descrição</TableHead>
-                <TableHead className="text-primary-foreground text-center">Ações</TableHead>
+              <TableRow className="bg-[#2c5282] hover:bg-[#2c5282]">
+                <TableHead className="text-white border border-[#4a5568]">Imagem</TableHead>
+                <TableHead className="text-white border border-[#4a5568]">Nome</TableHead>
+                <TableHead className="text-white border border-[#4a5568]">Nº de Série</TableHead>
+                <TableHead className="text-white border border-[#4a5568]">Categoria</TableHead>
+                <TableHead className="text-white border border-[#4a5568]">Quantidade Disponível</TableHead>
+                <TableHead className="text-white border border-[#4a5568]">Descrição</TableHead>
+                <TableHead className="text-white border border-[#4a5568] text-center">Ações</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {filteredEquipment.map(equip => (
                 <TableRow key={equip.id}>
-                  <TableCell className="font-medium">{equip.name}</TableCell>
-                  <TableCell>{equip.serial_number || "-"}</TableCell>
-                  <TableCell>{equip.categories?.name || "-"}</TableCell>
-                  <TableCell>{equip.available_quantity}</TableCell>
-                  <TableCell>{equip.description || "-"}</TableCell>
-                  <TableCell>
-                    <div className="flex gap-2 justify-center">
+                  <TableCell className="border">
+                    {equip.image_url ? (
+                      <img src={equip.image_url} alt="" className="w-10 h-10 object-cover rounded" />
+                    ) : (
+                      <div className="w-10 h-10 bg-muted rounded flex items-center justify-center text-xs">
+                        -
+                      </div>
+                    )}
+                  </TableCell>
+                  <TableCell className="border font-medium">{equip.name}</TableCell>
+                  <TableCell className="border">{equip.serial_number || "-"}</TableCell>
+                  <TableCell className="border">{equip.categories?.name || "-"}</TableCell>
+                  <TableCell className="border">
+                    <div className="flex items-center gap-2">
+                      {equip.available_quantity}
+                      {equip.available_quantity <= 5 && (
+                        <Badge variant="destructive" className="text-xs">Baixo</Badge>
+                      )}
+                    </div>
+                  </TableCell>
+                  <TableCell className="border">{equip.description || "-"}</TableCell>
+                  <TableCell className="border">
+                    <div className="flex flex-col gap-2">
                       <Button
                         onClick={() => handleEdit(equip)}
                         size="sm"
-                        className="bg-primary hover:bg-primary-dark"
+                        className="w-full"
+                        disabled={!canEdit}
                       >
                         <Edit className="h-4 w-4 mr-1" />
                         Editar
@@ -277,6 +357,8 @@ const Inventory = () => {
                         onClick={() => handleDelete(equip.id)}
                         size="sm"
                         variant="destructive"
+                        className="w-full"
+                        disabled={!canEdit}
                       >
                         <Trash className="h-4 w-4 mr-1" />
                         Excluir
@@ -288,6 +370,9 @@ const Inventory = () => {
             </TableBody>
           </Table>
         </div>
+
+        {/* Audit Log (Developers Only) */}
+        {isDeveloper && <AuditLog />}
       </div>
     </Layout>
   );
