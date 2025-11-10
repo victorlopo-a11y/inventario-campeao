@@ -52,6 +52,7 @@ const Layout = ({ children }: LayoutProps) => {
 
   const isTrackingPage = location.pathname === "/";
   const isInventoryPage = location.pathname === "/inventario";
+  const isReportsPage = location.pathname === "/relatorios";
 
   return (
     <div className="min-h-screen bg-background">
@@ -75,7 +76,7 @@ const Layout = ({ children }: LayoutProps) => {
         </div>
 
         {/* Navigation Tabs */}
-        <div className="grid grid-cols-2 gap-3 mb-6">
+        <div className="grid grid-cols-3 gap-3 mb-6">
           <Button
             onClick={() => navigate("/")}
             variant={isTrackingPage ? "default" : "secondary"}
@@ -89,6 +90,13 @@ const Layout = ({ children }: LayoutProps) => {
             className="w-full py-6 text-base font-medium"
           >
             Inventário
+          </Button>
+          <Button
+            onClick={() => navigate("/relatorios")}
+            variant={isReportsPage ? "default" : "secondary"}
+            className="w-full py-6 text-base font-medium"
+          >
+            Relatórios
           </Button>
         </div>
 
