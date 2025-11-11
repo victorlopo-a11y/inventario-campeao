@@ -7,7 +7,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { toast } from 'sonner';
 import { Shield, UserCog, Eye, Trash2 } from 'lucide-react';
 
-type UserRole = 'leitor' | 'editor' | 'desenvolvedor';
+type UserRole = 'visualizador' | 'programador' | 'administrador';
 
 interface Profile {
   id: string;
@@ -84,8 +84,8 @@ export function UserManagement() {
 
   const getRoleIcon = (role: string) => {
     switch (role) {
-      case 'desenvolvedor': return <Shield className="w-4 h-4 text-red-500" />;
-      case 'editor': return <UserCog className="w-4 h-4 text-blue-500" />;
+      case 'administrador': return <Shield className="w-4 h-4 text-red-500" />;
+      case 'programador': return <UserCog className="w-4 h-4 text-blue-500" />;
       default: return <Eye className="w-4 h-4 text-gray-500" />;
     }
   };
@@ -110,8 +110,8 @@ export function UserManagement() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {profiles.map((profile) => {
-              const currentRole = (profile.user_roles[0]?.role || 'leitor') as UserRole;
+          {profiles.map((profile) => {
+              const currentRole = (profile.user_roles[0]?.role || 'visualizador') as UserRole;
               return (
                 <TableRow key={profile.id}>
                   <TableCell>{profile.email}</TableCell>
@@ -130,9 +130,9 @@ export function UserManagement() {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="leitor">Leitor</SelectItem>
-                        <SelectItem value="editor">Editor</SelectItem>
-                        <SelectItem value="desenvolvedor">Desenvolvedor</SelectItem>
+                        <SelectItem value="visualizador">Visualizador</SelectItem>
+                        <SelectItem value="programador">Programador</SelectItem>
+                        <SelectItem value="administrador">Administrador</SelectItem>
                       </SelectContent>
                     </Select>
                   </TableCell>

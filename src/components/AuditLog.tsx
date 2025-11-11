@@ -80,7 +80,7 @@ export function AuditLog() {
   return (
     <Card className="mt-4">
       <CardHeader>
-        <CardTitle className="text-sm">Registro de Atividades (Apenas Desenvolvedores)</CardTitle>
+        <CardTitle className="text-sm">Registro de Atividades (Apenas Administradores)</CardTitle>
       </CardHeader>
       <CardContent>
         <ScrollArea className="h-[300px]">

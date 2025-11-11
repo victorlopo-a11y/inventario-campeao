@@ -33,7 +33,7 @@ interface EquipmentData {
 
 const Inventory = () => {
   const { toast } = useToast();
-  const { canEdit, isDeveloper, loading: roleLoading } = useUserRole();
+  const { canEdit, isAdmin, loading: roleLoading } = useUserRole();
   const [categories, setCategories] = useState<Category[]>([]);
   const [equipment, setEquipment] = useState<EquipmentData[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -181,7 +181,7 @@ const Inventory = () => {
       <div className="space-y-6">
         <h1 className="text-3xl font-bold text-center">Inventário de Equipamentos</h1>
 
-        {/* Low Stock Alert for Editors */}
+        {/* Low Stock Alert for Programmers/Administrators */}
         {canEdit && lowStockItems.length > 0 && (
           <Alert variant="destructive">
             <AlertTriangle className="h-4 w-4" />
@@ -194,8 +194,8 @@ const Inventory = () => {
         {/* Low Stock Notifications */}
         {canEdit && <LowStockNotifications />}
 
-        {/* User Management (Developers Only) */}
-        {isDeveloper && <UserManagement />}
+        {/* User Management (Administrators Only) */}
+        {isAdmin && <UserManagement />}
 
         {/* Form */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -371,8 +371,8 @@ const Inventory = () => {
           </Table>
         </div>
 
-        {/* Audit Log (Developers Only) */}
-        {isDeveloper && <AuditLog />}
+        {/* Audit Log (Administrators Only) */}
+        {isAdmin && <AuditLog />}
       </div>
     </Layout>
   );
