@@ -110,7 +110,7 @@ export function UserManagement() {
             </TableRow>
           </TableHeader>
           <TableBody>
-          {profiles.map((profile) => {
+            {profiles.map((profile) => {
               const currentRole = (profile.user_roles[0]?.role || 'visualizador') as UserRole;
               return (
                 <TableRow key={profile.id}>
