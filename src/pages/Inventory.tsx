@@ -13,6 +13,7 @@ import { useUserRole } from "@/hooks/useUserRole";
 import { LowStockNotifications } from "@/components/LowStockNotifications";
 import { AuditLog } from "@/components/AuditLog";
 import { UserManagement } from "@/components/UserManagement";
+import { EquipmentHistoryDialog } from "@/components/EquipmentHistoryDialog";
 import { Save, Trash2, FileDown, Edit, Trash, AlertTriangle } from "lucide-react";
 
 interface Category {
@@ -344,6 +345,10 @@ const Inventory = () => {
                   <TableCell className="border">{equip.description || "-"}</TableCell>
                   <TableCell className="border">
                     <div className="flex flex-col gap-2">
+                      <EquipmentHistoryDialog 
+                        equipmentId={equip.id}
+                        equipmentName={equip.name}
+                      />
                       <Button
                         onClick={() => handleEdit(equip)}
                         size="sm"

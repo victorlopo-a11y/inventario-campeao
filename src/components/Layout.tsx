@@ -4,6 +4,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { LogOut, Moon, Sun } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { RealtimeNotifications } from "@/components/RealtimeNotifications";
+import { useUserRole } from "@/hooks/useUserRole";
 
 interface LayoutProps {
   children: ReactNode;
@@ -13,6 +15,7 @@ const Layout = ({ children }: LayoutProps) => {
   const navigate = useNavigate();
   const location = useLocation();
   const { toast } = useToast();
+  const { canEdit } = useUserRole();
   const [darkMode, setDarkMode] = useState(false);
 
   useEffect(() => {
@@ -66,13 +69,16 @@ const Layout = ({ children }: LayoutProps) => {
             <LogOut className="mr-2 h-5 w-5" />
             Sair do Usuário
           </Button>
-          <Button
-            onClick={() => setDarkMode(!darkMode)}
-            className="bg-primary hover:bg-primary-dark text-primary-foreground w-full py-6 text-base font-medium"
-          >
-            {darkMode ? <Sun className="mr-2 h-5 w-5" /> : <Moon className="mr-2 h-5 w-5" />}
-            Modo {darkMode ? "Claro" : "Escuro"}
-          </Button>
+          <div className="flex gap-2">
+            {canEdit && <RealtimeNotifications />}
+            <Button
+              onClick={() => setDarkMode(!darkMode)}
+              className="bg-primary hover:bg-primary-dark text-primary-foreground flex-1 py-6 text-base font-medium"
+            >
+              {darkMode ? <Sun className="mr-2 h-5 w-5" /> : <Moon className="mr-2 h-5 w-5" />}
+              Modo {darkMode ? "Claro" : "Escuro"}
+            </Button>
+          </div>
         </div>
 
         {/* Navigation Tabs */}

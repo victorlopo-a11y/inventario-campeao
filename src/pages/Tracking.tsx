@@ -3,7 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import Layout from "@/components/Layout";
 import StatusCard from "@/components/StatusCard";
 import StatusDistributionChart from "@/components/StatusDistributionChart";
-import EquipmentHistoryDialog from "@/components/EquipmentHistoryDialog";
+import { EquipmentHistoryDialog } from "@/components/EquipmentHistoryDialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
