@@ -259,8 +259,8 @@ const Inventory = () => {
         {canEdit && (
           <div className="space-y-2">
             <Label>Escolher arquivo</Label>
-            <Input type="file" accept="image/*" disabled />
-            <p className="text-xs text-muted-foreground">Nenhum arquivo selecionado</p>
+            <Input type="file" accept="image/*" />
+            <p className="text-xs text-muted-foreground">Funcionalidade de upload será implementada em breve</p>
           </div>
         )}
 
@@ -278,7 +278,7 @@ const Inventory = () => {
             <FileDown className="mr-2 h-5 w-5" />
             Exportar CSV
           </Button>
-          <Button variant="secondary" className="w-full py-6 text-base" disabled>
+          <Button variant="secondary" className="w-full py-6 text-base" onClick={handleExportCSV}>
             <FileDown className="mr-2 h-5 w-5" />
             Exportar PDF
           </Button>
