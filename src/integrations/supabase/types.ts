@@ -96,6 +96,41 @@ export type Database = {
           },
         ]
       }
+      equipment_history: {
+        Row: {
+          action: string
+          changed_by: string | null
+          changes: Json | null
+          created_at: string
+          equipment_id: string
+          id: string
+        }
+        Insert: {
+          action: string
+          changed_by?: string | null
+          changes?: Json | null
+          created_at?: string
+          equipment_id: string
+          id?: string
+        }
+        Update: {
+          action?: string
+          changed_by?: string | null
+          changes?: Json | null
+          created_at?: string
+          equipment_id?: string
+          id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "equipment_history_equipment_id_fkey"
+            columns: ["equipment_id"]
+            isOneToOne: false
+            referencedRelation: "equipment"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       locations: {
         Row: {
           created_at: string
