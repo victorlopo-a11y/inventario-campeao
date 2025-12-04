@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import Layout from "@/components/Layout";
 import { Button } from "@/components/ui/button";
@@ -14,7 +14,7 @@ import { LowStockNotifications } from "@/components/LowStockNotifications";
 import { AuditLog } from "@/components/AuditLog";
 import { UserManagement } from "@/components/UserManagement";
 import { EquipmentHistoryDialog } from "@/components/EquipmentHistoryDialog";
-import { Save, Trash2, FileDown, Edit, Trash, AlertTriangle } from "lucide-react";
+import { Save, Trash2, FileDown, Edit, Trash, AlertTriangle, Upload, Loader2 } from "lucide-react";
 
 interface Category {
   id: string;
@@ -44,8 +44,11 @@ const Inventory = () => {
   const [selectedCategory, setSelectedCategory] = useState("");
   const [quantity, setQuantity] = useState("0");
   const [description, setDescription] = useState("");
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("all");
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     fetchData();
@@ -62,6 +65,40 @@ const Inventory = () => {
 
     if (catRes.data) setCategories(catRes.data);
     if (equipRes.data) setEquipment(equipRes.data as any);
+  };
+
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setUploading(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        toast({ title: "Erro", description: "Você precisa estar logado para fazer upload", variant: "destructive" });
+        return;
+      }
+
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const response = await supabase.functions.invoke('upload-image', {
+        body: formData,
+      });
+
+      if (response.error) {
+        throw new Error(response.error.message);
+      }
+
+      const { url } = response.data;
+      setImageUrl(url);
+      toast({ title: "Sucesso", description: "Imagem enviada com sucesso!" });
+    } catch (error: any) {
+      console.error('Upload error:', error);
+      toast({ title: "Erro", description: error.message || "Erro ao enviar imagem", variant: "destructive" });
+    } finally {
+      setUploading(false);
+    }
   };
 
   const handleSave = async () => {
@@ -83,6 +120,7 @@ const Inventory = () => {
       category_id: selectedCategory || null,
       available_quantity: parseInt(quantity),
       description: description || null,
+      image_url: imageUrl,
       ...(editingId ? { updated_by: user?.id } : { created_by: user?.id }),
     };
 
@@ -112,7 +150,11 @@ const Inventory = () => {
     setSelectedCategory("");
     setQuantity("0");
     setDescription("");
+    setImageUrl(null);
     setEditingId(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
   };
 
   const handleEdit = (equip: EquipmentData) => {
@@ -125,6 +167,7 @@ const Inventory = () => {
     setSelectedCategory(equip.category_id || "");
     setQuantity(equip.available_quantity.toString());
     setDescription(equip.description || "");
+    setImageUrl(equip.image_url);
     setEditingId(equip.id);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
@@ -259,15 +302,41 @@ const Inventory = () => {
         {/* File Upload */}
         {canEdit && (
           <div className="space-y-2">
-            <Label>Escolher arquivo</Label>
-            <Input type="file" accept="image/*" />
-            <p className="text-xs text-muted-foreground">Funcionalidade de upload será implementada em breve</p>
+            <Label>Imagem do Equipamento</Label>
+            <div className="flex items-center gap-4">
+              <Input 
+                ref={fileInputRef}
+                type="file" 
+                accept="image/*" 
+                onChange={handleImageUpload}
+                disabled={uploading}
+                className="flex-1"
+              />
+              {uploading && (
+                <div className="flex items-center gap-2 text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <span>Enviando...</span>
+                </div>
+              )}
+            </div>
+            {imageUrl && (
+              <div className="mt-2 flex items-center gap-4">
+                <img src={imageUrl} alt="Preview" className="w-20 h-20 object-cover rounded border" />
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={() => setImageUrl(null)}
+                >
+                  Remover
+                </Button>
+              </div>
+            )}
           </div>
         )}
 
         {/* Action Buttons */}
         <div className="space-y-3">
-          <Button onClick={handleSave} className="w-full py-6 text-base" disabled={!canEdit}>
+          <Button onClick={handleSave} className="w-full py-6 text-base" disabled={!canEdit || uploading}>
             <Save className="mr-2 h-5 w-5" />
             Salvar
           </Button>
