@@ -36,8 +36,9 @@ export function useUserRole() {
   }, []);
 
   const hasRole = (role: UserRole) => roles.includes(role);
-  const canEdit = hasRole('programador') || hasRole('administrador');
+  const canEditInventory = hasRole('programador') || hasRole('administrador');
+  const canMove = roles.length > 0; // Todos usuários autenticados podem movimentar
   const isAdmin = hasRole('administrador');
 
-  return { roles, hasRole, canEdit, isAdmin, loading };
+  return { roles, hasRole, canEdit: canEditInventory, canMove, isAdmin, loading };
 }
