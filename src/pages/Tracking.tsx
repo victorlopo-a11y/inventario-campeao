@@ -8,8 +8,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
-import { Save, Trash2, FileDown, QrCode, Edit, History } from "lucide-react";
+import { Save, Trash2, FileDown, QrCode, Edit, History, Undo2 } from "lucide-react";
 
 interface Equipment {
   id: string;
@@ -65,9 +66,36 @@ const Tracking = () => {
   const [historyDialogOpen, setHistoryDialogOpen] = useState(false);
   const [selectedHistoryEquipment, setSelectedHistoryEquipment] = useState<{ id: string; name: string } | null>(null);
 
+  // Edit state
+  const [editingRecord, setEditingRecord] = useState<TrackingRecord | null>(null);
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [editStatus, setEditStatus] = useState("");
+  const [editQuantity, setEditQuantity] = useState("");
+  const [editLocation, setEditLocation] = useState("");
+  const [editSector, setEditSector] = useState("");
+  const [editResponsible, setEditResponsible] = useState("");
+  const [editDeliveredBy, setEditDeliveredBy] = useState("");
+  const [editReceivedBy, setEditReceivedBy] = useState("");
+
+  // Dar Baixa state
+  const [baixaDialogOpen, setBaixaDialogOpen] = useState(false);
+  const [baixaRecord, setBaixaRecord] = useState<TrackingRecord | null>(null);
+  const [baixaCondition, setBaixaCondition] = useState("bom");
+  const [baixaResponsible, setBaixaResponsible] = useState("");
+  const [baixaNotes, setBaixaNotes] = useState("");
+  const [currentUserEmail, setCurrentUserEmail] = useState("");
+
   useEffect(() => {
     fetchData();
+    fetchCurrentUser();
   }, []);
+
+  const fetchCurrentUser = async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user?.email) {
+      setCurrentUserEmail(user.email);
+    }
+  };
 
   const fetchData = async () => {
     const [equipRes, locRes, secRes, trackRes] = await Promise.all([
@@ -140,6 +168,101 @@ const Tracking = () => {
   const handleShowHistory = (equipmentId: string, equipmentName: string) => {
     setSelectedHistoryEquipment({ id: equipmentId, name: equipmentName });
     setHistoryDialogOpen(true);
+  };
+
+  // Edit functions
+  const handleEdit = (record: TrackingRecord) => {
+    setEditingRecord(record);
+    setEditStatus(record.status);
+    setEditQuantity(record.quantity.toString());
+    setEditLocation(record.location_id || "");
+    setEditSector(record.sector_id || "");
+    setEditResponsible(record.responsible_person || "");
+    setEditDeliveredBy(record.delivered_by || "");
+    setEditReceivedBy(record.received_by || "");
+    setEditDialogOpen(true);
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editingRecord) return;
+
+    const { error } = await supabase.from("tracking").update({
+      status: editStatus,
+      quantity: parseInt(editQuantity),
+      location_id: editLocation || null,
+      sector_id: editSector || null,
+      responsible_person: editResponsible || null,
+      delivered_by: editDeliveredBy || null,
+      received_by: editReceivedBy || null,
+    }).eq("id", editingRecord.id);
+
+    if (error) {
+      toast({ title: "Erro", description: error.message, variant: "destructive" });
+    } else {
+      toast({ title: "Sucesso", description: "Registro atualizado!" });
+      setEditDialogOpen(false);
+      setEditingRecord(null);
+      fetchData();
+    }
+  };
+
+  // Dar Baixa functions
+  const handleOpenBaixa = (record: TrackingRecord) => {
+    setBaixaRecord(record);
+    setBaixaCondition("bom");
+    setBaixaResponsible(currentUserEmail);
+    setBaixaNotes("");
+    setBaixaDialogOpen(true);
+  };
+
+  const handleConfirmBaixa = async () => {
+    if (!baixaRecord) return;
+
+    const now = new Date();
+    const formattedDate = now.toLocaleString("pt-BR");
+
+    // Create a new tracking record for the return
+    const { error: trackingError } = await supabase.from("tracking").insert({
+      equipment_id: baixaRecord.equipment_id,
+      status: baixaCondition === "bom" ? "devolucao" : "danificado",
+      quantity: baixaRecord.quantity,
+      location_id: null,
+      sector_id: null,
+      responsible_person: baixaResponsible,
+      delivered_by: baixaResponsible,
+      received_by: "Sala de Setup",
+      notes: `Baixa realizada em ${formattedDate}. Condição: ${baixaCondition === "bom" ? "Bom estado" : "Danificado"}. ${baixaNotes ? `Observações: ${baixaNotes}` : ""}`,
+    });
+
+    if (trackingError) {
+      toast({ title: "Erro", description: trackingError.message, variant: "destructive" });
+      return;
+    }
+
+    // Update equipment quantity in inventory if in good condition
+    if (baixaCondition === "bom") {
+      const { data: equipData } = await supabase
+        .from("equipment")
+        .select("available_quantity")
+        .eq("id", baixaRecord.equipment_id)
+        .single();
+
+      if (equipData) {
+        const newQuantity = equipData.available_quantity + baixaRecord.quantity;
+        await supabase
+          .from("equipment")
+          .update({ available_quantity: newQuantity })
+          .eq("id", baixaRecord.equipment_id);
+      }
+    }
+
+    toast({ 
+      title: "Sucesso", 
+      description: `Baixa realizada! Equipamento ${baixaCondition === "bom" ? "devolvido ao inventário" : "marcado como danificado"}.` 
+    });
+    setBaixaDialogOpen(false);
+    setBaixaRecord(null);
+    fetchData();
   };
 
   const handleExportCSV = () => {
@@ -419,7 +542,12 @@ const Tracking = () => {
                       <td className="border border-border p-3">{record.received_by || "-"}</td>
                       <td className="border border-border p-3">
                         <div className="flex flex-col gap-2">
-                          <Button size="sm" variant="default" className="w-full">
+                          <Button 
+                            size="sm" 
+                            variant="default" 
+                            className="w-full"
+                            onClick={() => handleEdit(record)}
+                          >
                             <Edit className="h-3 w-3 mr-1" />
                             Editar
                           </Button>
@@ -432,6 +560,17 @@ const Tracking = () => {
                             <Trash2 className="h-3 w-3 mr-1" />
                             Excluir
                           </Button>
+                          {(record.status === "saida" || record.status === "manutencao") && (
+                            <Button 
+                              size="sm" 
+                              variant="outline" 
+                              className="w-full bg-green-600 hover:bg-green-700 text-white border-green-600"
+                              onClick={() => handleOpenBaixa(record)}
+                            >
+                              <Undo2 className="h-3 w-3 mr-1" />
+                              Dar Baixa
+                            </Button>
+                          )}
                           <Button 
                             size="sm" 
                             variant="secondary" 
@@ -451,24 +590,185 @@ const Tracking = () => {
           </div>
         </div>
 
-        {/* Status Chart - Moved below the table */}
-        <StatusDistributionChart
-          saida={statusCounts.saida}
-          manutencao={statusCounts.manutencao}
-          danificado={statusCounts.danificado}
-          devolucao={statusCounts.devolucao}
+        {/* Status Distribution Chart */}
+        <StatusDistributionChart 
+          saida={statusCounts.saida} 
+          manutencao={statusCounts.manutencao} 
+          danificado={statusCounts.danificado} 
+          devolucao={statusCounts.devolucao} 
         />
       </div>
 
-      <EquipmentHistoryDialog
-        equipmentId={selectedHistoryEquipment?.id || null}
-        equipmentName={selectedHistoryEquipment?.name || ""}
-        open={historyDialogOpen}
-        onClose={() => {
-          setHistoryDialogOpen(false);
-          setSelectedHistoryEquipment(null);
-        }}
-      />
+      {/* Equipment History Dialog */}
+      {selectedHistoryEquipment && (
+        <EquipmentHistoryDialog
+          equipmentId={selectedHistoryEquipment.id}
+          equipmentName={selectedHistoryEquipment.name}
+          open={historyDialogOpen}
+          onClose={() => {
+            setHistoryDialogOpen(false);
+            setSelectedHistoryEquipment(null);
+          }}
+        />
+      )}
+
+      {/* Edit Dialog */}
+      <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Editar Registro</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Status</Label>
+              <Select value={editStatus} onValueChange={setEditStatus}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="saida">Saída</SelectItem>
+                  <SelectItem value="manutencao">Em Manutenção</SelectItem>
+                  <SelectItem value="danificado">Danificado</SelectItem>
+                  <SelectItem value="devolucao">Devolução</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Quantidade</Label>
+              <Input
+                type="number"
+                value={editQuantity}
+                onChange={e => setEditQuantity(e.target.value)}
+                min="1"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Localização</Label>
+              <Select value={editLocation} onValueChange={setEditLocation}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Selecione uma localização" />
+                </SelectTrigger>
+                <SelectContent>
+                  {locations.map(l => (
+                    <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Setor</Label>
+              <Select value={editSector} onValueChange={setEditSector}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Selecione o setor" />
+                </SelectTrigger>
+                <SelectContent>
+                  {sectors.map(s => (
+                    <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Responsável</Label>
+              <Input
+                value={editResponsible}
+                onChange={e => setEditResponsible(e.target.value)}
+                placeholder="Responsável"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Quem Entregou</Label>
+              <Input
+                value={editDeliveredBy}
+                onChange={e => setEditDeliveredBy(e.target.value)}
+                placeholder="Quem Entregou"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Quem Recebeu</Label>
+              <Input
+                value={editReceivedBy}
+                onChange={e => setEditReceivedBy(e.target.value)}
+                placeholder="Quem Recebeu"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditDialogOpen(false)}>
+              Cancelar
+            </Button>
+            <Button onClick={handleSaveEdit}>
+              Salvar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dar Baixa Dialog */}
+      <Dialog open={baixaDialogOpen} onOpenChange={setBaixaDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Dar Baixa no Equipamento</DialogTitle>
+          </DialogHeader>
+          {baixaRecord && (
+            <div className="space-y-4">
+              <div className="bg-muted p-4 rounded-lg">
+                <p className="font-medium">{baixaRecord.equipment.name}</p>
+                <p className="text-sm text-muted-foreground">
+                  Nº Série: {baixaRecord.equipment.serial_number || "-"}
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  Quantidade: {baixaRecord.quantity}
+                </p>
+              </div>
+              
+              <div className="space-y-2">
+                <Label>Responsável pela Baixa</Label>
+                <Input
+                  value={baixaResponsible}
+                  onChange={e => setBaixaResponsible(e.target.value)}
+                  placeholder="Nome do responsável"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label>Condição do Equipamento</Label>
+                <Select value={baixaCondition} onValueChange={setBaixaCondition}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="bom">Bom Estado</SelectItem>
+                    <SelectItem value="danificado">Danificado</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Observações (opcional)</Label>
+                <Input
+                  value={baixaNotes}
+                  onChange={e => setBaixaNotes(e.target.value)}
+                  placeholder="Observações adicionais"
+                />
+              </div>
+
+              <div className="bg-muted/50 p-3 rounded text-sm">
+                <p><strong>Data/Hora:</strong> {new Date().toLocaleString("pt-BR")}</p>
+                <p><strong>Usuário:</strong> {currentUserEmail}</p>
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setBaixaDialogOpen(false)}>
+              Cancelar
+            </Button>
+            <Button onClick={handleConfirmBaixa} className="bg-green-600 hover:bg-green-700">
+              Confirmar Baixa
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Layout>
   );
 };
