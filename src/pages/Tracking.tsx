@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+﻿import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import Layout from "@/components/Layout";
 import StatusCard from "@/components/StatusCard";
@@ -90,6 +90,55 @@ const Tracking = () => {
     fetchCurrentUser();
   }, []);
 
+  const getAvailableQuantity = async (equipmentId: string) => {
+    const { data, error } = await supabase
+      .from("equipment")
+      .select("available_quantity")
+      .eq("id", equipmentId)
+      .single();
+
+    if (error) {
+      toast({ title: "Erro", description: "Nao foi possivel verificar o estoque", variant: "destructive" });
+      return null;
+    }
+
+    return data?.available_quantity ?? null;
+  };
+
+  const updateInventoryByStatus = async (equipmentId: string, movementStatus: string, qty: number) => {
+    let delta = 0;
+
+    if (movementStatus === "saida" || movementStatus === "manutencao") {
+      const available = await getAvailableQuantity(equipmentId);
+      if (available === null) return false;
+      if (available < qty) {
+        toast({ title: "Erro", description: "Quantidade insuficiente em estoque para esta movimentacao", variant: "destructive" });
+        return false;
+      }
+      delta = -qty;
+    } else if (movementStatus === "devolucao") {
+      delta = qty;
+    } else {
+      return true;
+    }
+
+    const current = await getAvailableQuantity(equipmentId);
+    if (current === null) return false;
+
+    const newQuantity = current + delta;
+    const { error } = await supabase
+      .from("equipment")
+      .update({ available_quantity: newQuantity })
+      .eq("id", equipmentId);
+
+    if (error) {
+      toast({ title: "Erro", description: "Nao foi possivel atualizar o estoque", variant: "destructive" });
+      return false;
+    }
+
+    return true;
+  };
+
   const fetchCurrentUser = async () => {
     const { data: { user } } = await supabase.auth.getUser();
     if (user?.email) {
@@ -122,33 +171,21 @@ const Tracking = () => {
       return;
     }
 
-    const qty = parseInt(quantity);
+    const qtyNumber = parseInt(quantity);
 
-    // If status is "saida" or "manutencao", decrease inventory quantity
     if (status === "saida" || status === "manutencao") {
-      const { data: equipData } = await supabase
-        .from("equipment")
-        .select("available_quantity")
-        .eq("id", selectedEquipment)
-        .single();
-
-      if (equipData) {
-        if (equipData.available_quantity < qty) {
-          toast({ title: "Erro", description: "Quantidade insuficiente no inventário", variant: "destructive" });
-          return;
-        }
-        const newQuantity = equipData.available_quantity - qty;
-        await supabase
-          .from("equipment")
-          .update({ available_quantity: newQuantity })
-          .eq("id", selectedEquipment);
+      const available = await getAvailableQuantity(selectedEquipment);
+      if (available === null) return;
+      if (available < qtyNumber) {
+        toast({ title: "Erro", description: "Estoque insuficiente para esta saida", variant: "destructive" });
+        return;
       }
     }
 
     const { error } = await supabase.from("tracking").insert({
       equipment_id: selectedEquipment,
       status,
-      quantity: qty,
+      quantity: qtyNumber,
       location_id: selectedLocation || null,
       sector_id: selectedSector || null,
       responsible_person: responsible || null,
@@ -159,9 +196,12 @@ const Tracking = () => {
     if (error) {
       toast({ title: "Erro", description: error.message, variant: "destructive" });
     } else {
-      toast({ title: "Sucesso", description: "Rastreamento salvo!" });
-      handleClear();
-      fetchData();
+      const updated = await updateInventoryByStatus(selectedEquipment, status, qtyNumber);
+      if (updated) {
+        toast({ title: "Sucesso", description: "Rastreamento salvo!" });
+        handleClear();
+        fetchData();
+      }
     }
   };
 
@@ -262,21 +302,15 @@ const Tracking = () => {
       return;
     }
 
-    // Update equipment quantity in inventory if in good condition
-    if (baixaCondition === "bom") {
-      const { data: equipData } = await supabase
-        .from("equipment")
-        .select("available_quantity")
-        .eq("id", baixaRecord.equipment_id)
-        .single();
+    const movementStatus = baixaCondition === "bom" ? "devolucao" : "danificado";
+    const inventoryUpdated = await updateInventoryByStatus(
+      baixaRecord.equipment_id,
+      movementStatus,
+      baixaRecord.quantity
+    );
 
-      if (equipData) {
-        const newQuantity = equipData.available_quantity + baixaRecord.quantity;
-        await supabase
-          .from("equipment")
-          .update({ available_quantity: newQuantity })
-          .eq("id", baixaRecord.equipment_id);
-      }
+    if (!inventoryUpdated) {
+      return;
     }
 
     toast({ 
@@ -797,3 +831,4 @@ const Tracking = () => {
 };
 
 export default Tracking;
+
