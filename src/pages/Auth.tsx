@@ -9,6 +9,7 @@ import { useToast } from "@/hooks/use-toast";
 
 const Auth = () => {
   const [isLogin, setIsLogin] = useState(true);
+  const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -32,11 +33,23 @@ const Auth = () => {
         });
         navigate("/");
       } else {
+        if (!fullName.trim()) {
+          toast({
+            title: "Informe seu nome",
+            description: "Adicione seu nome para criar a conta.",
+            variant: "destructive",
+          });
+          return;
+        }
+
         const { error } = await supabase.auth.signUp({
           email,
           password,
           options: {
             emailRedirectTo: `${window.location.origin}/`,
+            data: {
+              full_name: fullName.trim(),
+            },
           },
         });
         if (error) throw error;
@@ -45,6 +58,7 @@ const Auth = () => {
           description: "Você já pode fazer login.",
         });
         setIsLogin(true);
+        setFullName("");
       }
     } catch (error: any) {
       toast({
@@ -70,6 +84,19 @@ const Auth = () => {
         </CardHeader>
         <CardContent>
           <form onSubmit={handleAuth} className="space-y-4">
+            {!isLogin && (
+              <div className="space-y-2">
+                <Label htmlFor="fullName">Nome</Label>
+                <Input
+                  id="fullName"
+                  type="text"
+                  placeholder="Seu nome"
+                  value={fullName}
+                  onChange={(e) => setFullName(e.target.value)}
+                  required
+                />
+              </div>
+            )}
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>
               <Input
@@ -86,7 +113,7 @@ const Auth = () => {
               <Input
                 id="password"
                 type="password"
-                placeholder="••••••••"
+                placeholder="********"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required

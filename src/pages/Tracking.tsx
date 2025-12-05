@@ -143,6 +143,12 @@ const Tracking = () => {
     const { data: { user } } = await supabase.auth.getUser();
     if (user?.email) {
       setCurrentUserEmail(user.email);
+      const fullName =
+        (user.user_metadata as any)?.full_name ||
+        (user.user_metadata as any)?.name ||
+        (user.user_metadata as any)?.fullName;
+      // Preenche automaticamente quem entregou com o nome (fallback para email se nao houver)
+      setDeliveredBy(prev => prev || fullName || user.email);
     }
   };
 

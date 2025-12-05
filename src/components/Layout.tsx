@@ -17,12 +17,26 @@ const Layout = ({ children }: LayoutProps) => {
   const { toast } = useToast();
   const { canEdit } = useUserRole();
   const [darkMode, setDarkMode] = useState(false);
+  const [currentUserName, setCurrentUserName] = useState<string>("");
+
+  const setNameFromSession = (session: any) => {
+    const metadata = session?.user?.user_metadata || {};
+    const derivedName =
+      metadata.full_name ||
+      metadata.name ||
+      metadata.fullName ||
+      session?.user?.email ||
+      "";
+    setCurrentUserName(derivedName);
+  };
 
   useEffect(() => {
     const checkUser = async () => {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) {
         navigate("/auth");
+      } else {
+        setNameFromSession(session);
       }
     };
     checkUser();
@@ -30,6 +44,8 @@ const Layout = ({ children }: LayoutProps) => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (!session && location.pathname !== "/auth") {
         navigate("/auth");
+      } else if (session) {
+        setNameFromSession(session);
       }
     });
 
@@ -60,6 +76,11 @@ const Layout = ({ children }: LayoutProps) => {
   return (
     <div className="min-h-screen bg-background">
       <div className="max-w-7xl mx-auto p-4">
+        {currentUserName && (
+          <div className="mb-2 text-right text-sm font-medium text-foreground">
+            Olá, {currentUserName}
+          </div>
+        )}
         {/* Header com botões */}
         <div className="grid grid-cols-2 gap-3 mb-4">
           <Button
