@@ -122,10 +122,33 @@ const Tracking = () => {
       return;
     }
 
+    const qty = parseInt(quantity);
+
+    // If status is "saida" or "manutencao", decrease inventory quantity
+    if (status === "saida" || status === "manutencao") {
+      const { data: equipData } = await supabase
+        .from("equipment")
+        .select("available_quantity")
+        .eq("id", selectedEquipment)
+        .single();
+
+      if (equipData) {
+        if (equipData.available_quantity < qty) {
+          toast({ title: "Erro", description: "Quantidade insuficiente no inventário", variant: "destructive" });
+          return;
+        }
+        const newQuantity = equipData.available_quantity - qty;
+        await supabase
+          .from("equipment")
+          .update({ available_quantity: newQuantity })
+          .eq("id", selectedEquipment);
+      }
+    }
+
     const { error } = await supabase.from("tracking").insert({
       equipment_id: selectedEquipment,
       status,
-      quantity: parseInt(quantity),
+      quantity: qty,
       location_id: selectedLocation || null,
       sector_id: selectedSector || null,
       responsible_person: responsible || null,
