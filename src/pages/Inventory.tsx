@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+﻿import { useState, useEffect, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import Layout from "@/components/Layout";
 import { Button } from "@/components/ui/button";
@@ -8,12 +8,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { useUserRole } from "@/hooks/useUserRole";
 import { LowStockNotifications } from "@/components/LowStockNotifications";
 import { AuditLog } from "@/components/AuditLog";
 import { UserManagement } from "@/components/UserManagement";
 import { EquipmentHistoryDialog } from "@/components/EquipmentHistoryDialog";
+import { QRCodeCanvas } from "qrcode.react";
 import { Save, Trash2, FileDown, Edit, Trash, AlertTriangle, Upload, Loader2 } from "lucide-react";
 
 interface Category {
@@ -46,13 +48,69 @@ const Inventory = () => {
   const [description, setDescription] = useState("");
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [selectedImageName, setSelectedImageName] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("all");
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [qrDialogOpen, setQrDialogOpen] = useState(false);
+  const [qrPayload, setQrPayload] = useState("");
+  const [qrLabel, setQrLabel] = useState("");
 
   useEffect(() => {
     fetchData();
   }, []);
+
+  const buildQrPayload = (equip: EquipmentData) => {
+    const categoryName = categories.find(c => c.id === equip.category_id)?.name || "";
+    const payload = {
+      id: equip.id,
+      name: equip.name,
+      serial_number: equip.serial_number || equip.id,
+      category_id: equip.category_id,
+      category_name: categoryName,
+      available_quantity: equip.available_quantity,
+      description: equip.description,
+      image_url: equip.image_url,
+    };
+    return JSON.stringify(payload);
+  };
+
+  const openQrDialog = (equip: EquipmentData) => {
+    setQrPayload(buildQrPayload(equip));
+    setQrLabel(equip.name || "equipamento");
+    setQrDialogOpen(true);
+  };
+
+  const handleDownloadQr = () => {
+    const canvas = document.getElementById("equipment-qr-canvas") as HTMLCanvasElement | null;
+    if (!canvas) return;
+    const url = canvas.toDataURL("image/png");
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `qr-${qrLabel || "equipamento"}.png`;
+    a.click();
+  };
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds(prev => (
+      prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]
+    ));
+  };
+
+  const toggleSelectAll = () => {
+    const visibleIds = filteredEquipment.map(item => item.id);
+    const allSelected = visibleIds.every(id => selectedIds.includes(id));
+    setSelectedIds(allSelected ? [] : visibleIds);
+  };
+
+  const handlePrintLabels = () => {
+    if (selectedIds.length === 0) {
+      toast({ title: "Aviso", description: "Selecione pelo menos um equipamento." });
+      return;
+    }
+    window.print();
+  };
 
   const fetchData = async () => {
     const [catRes, equipRes] = await Promise.all([
@@ -71,6 +129,7 @@ const Inventory = () => {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    setSelectedImageName(file.name);
     setUploading(true);
     try {
       const { data: { session } } = await supabase.auth.getSession();
@@ -125,10 +184,20 @@ const Inventory = () => {
     };
 
     let error;
+    let savedRow: EquipmentData | null = null;
     if (editingId) {
-      ({ error } = await supabase.from("equipment").update(data).eq("id", editingId));
+      ({ data: savedRow, error } = await supabase
+        .from("equipment")
+        .update(data)
+        .eq("id", editingId)
+        .select("*")
+        .single());
     } else {
-      ({ error } = await supabase.from("equipment").insert(data));
+      ({ data: savedRow, error } = await supabase
+        .from("equipment")
+        .insert(data)
+        .select("*")
+        .single());
     }
 
     if (error) {
@@ -139,6 +208,9 @@ const Inventory = () => {
       }
     } else {
       toast({ title: "Sucesso", description: editingId ? "Equipamento atualizado!" : "Equipamento cadastrado!" });
+      if (savedRow) {
+        openQrDialog(savedRow);
+      }
       handleClear();
       fetchData();
     }
@@ -151,6 +223,8 @@ const Inventory = () => {
     setQuantity("0");
     setDescription("");
     setImageUrl(null);
+    setSelectedImageName("");
+    setSelectedIds([]);
     setEditingId(null);
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
@@ -222,7 +296,7 @@ const Inventory = () => {
 
   return (
     <Layout>
-      <div className="space-y-6">
+      <div className="space-y-6 print-hidden">
         <h1 className="text-3xl font-bold text-center">Inventário de Equipamentos</h1>
 
         {/* Low Stock Alert for Programmers/Administrators */}
@@ -303,15 +377,25 @@ const Inventory = () => {
         {canEdit && (
           <div className="space-y-2">
             <Label>Imagem do Equipamento</Label>
-            <div className="flex items-center gap-4">
-              <Input 
+            <div className="flex flex-wrap items-center gap-4">
+              <Input
                 ref={fileInputRef}
-                type="file" 
-                accept="image/*" 
+                type="file"
+                accept="image/*"
                 onChange={handleImageUpload}
                 disabled={uploading}
-                className="flex-1"
+                className="hidden"
               />
+              <Button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploading}
+              >
+                Selecionar imagem
+              </Button>
+              <span className="text-sm text-muted-foreground">
+                {selectedImageName || "Nenhum arquivo selecionado"}
+              </span>
               {uploading && (
                 <div className="flex items-center gap-2 text-muted-foreground">
                   <Loader2 className="h-4 w-4 animate-spin" />
@@ -322,10 +406,16 @@ const Inventory = () => {
             {imageUrl && (
               <div className="mt-2 flex items-center gap-4">
                 <img src={imageUrl} alt="Preview" className="w-20 h-20 object-cover rounded border" />
-                <Button 
-                  variant="outline" 
-                  size="sm" 
-                  onClick={() => setImageUrl(null)}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setImageUrl(null);
+                    setSelectedImageName("");
+                    if (fileInputRef.current) {
+                      fileInputRef.current.value = "";
+                    }
+                  }}
                 >
                   Remover
                 </Button>
@@ -343,6 +433,9 @@ const Inventory = () => {
           <Button onClick={handleClear} variant="secondary" className="w-full py-6 text-base" disabled={!canEdit}>
             <Trash2 className="mr-2 h-5 w-5" />
             Limpar
+          </Button>
+          <Button onClick={handlePrintLabels} variant="secondary" className="w-full py-6 text-base">
+            Imprimir etiquetas
           </Button>
           <Button onClick={handleExportCSV} variant="secondary" className="w-full py-6 text-base">
             <FileDown className="mr-2 h-5 w-5" />
@@ -379,6 +472,13 @@ const Inventory = () => {
           <Table>
             <TableHeader>
               <TableRow className="bg-[#2c5282] hover:bg-[#2c5282]">
+              <TableHead className="text-white border border-[#4a5568] text-center">
+                <input
+                  type="checkbox"
+                  checked={filteredEquipment.length > 0 && filteredEquipment.every(item => selectedIds.includes(item.id))}
+                  onChange={toggleSelectAll}
+                />
+              </TableHead>
                 <TableHead className="text-white border border-[#4a5568]">Imagem</TableHead>
                 <TableHead className="text-white border border-[#4a5568]">Nome</TableHead>
                 <TableHead className="text-white border border-[#4a5568]">Nº de Série</TableHead>
@@ -391,6 +491,13 @@ const Inventory = () => {
             <TableBody>
               {filteredEquipment.map(equip => (
                 <TableRow key={equip.id}>
+                <TableCell className="border text-center">
+                  <input
+                    type="checkbox"
+                    checked={selectedIds.includes(equip.id)}
+                    onChange={() => toggleSelect(equip.id)}
+                  />
+                </TableCell>
                   <TableCell className="border">
                     {equip.image_url ? (
                       <img src={equip.image_url} alt="" className="w-10 h-10 object-cover rounded" />
@@ -428,6 +535,14 @@ const Inventory = () => {
                         Editar
                       </Button>
                       <Button
+                        onClick={() => openQrDialog(equip)}
+                        size="sm"
+                        variant="secondary"
+                        className="w-full"
+                      >
+                        QR
+                      </Button>
+                      <Button
                         onClick={() => handleDelete(equip.id)}
                         size="sm"
                         variant="destructive"
@@ -448,8 +563,89 @@ const Inventory = () => {
         {/* Audit Log (Administrators Only) */}
         {isAdmin && <AuditLog />}
       </div>
+
+      <Dialog open={qrDialogOpen} onOpenChange={setQrDialogOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>QR do equipamento</DialogTitle>
+          </DialogHeader>
+          <div className="flex flex-col items-center gap-3">
+            {qrPayload ? (
+              <QRCodeCanvas value={qrPayload} size={220} includeMargin id="equipment-qr-canvas" />
+            ) : (
+              <p className="text-sm text-muted-foreground">Sem dados para gerar QR.</p>
+            )}
+            <p className="text-sm text-muted-foreground text-center">
+              Use este QR para leitura no rastreamento.
+            </p>
+            <Button variant="secondary" className="w-full" onClick={handleDownloadQr}>
+              Baixar QR
+            </Button>
+            <Button className="w-full" onClick={() => setQrDialogOpen(false)}>
+              Fechar
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <style>{`
+        @media screen {
+          #print-area {
+            display: none;
+          }
+        }
+        @media print {
+          body {
+            margin: 0;
+          }
+          .print-hidden,
+          .print-hide {
+            display: none !important;
+          }
+          #print-area {
+            display: block;
+            position: static;
+            width: 100%;
+          }
+          .print-grid {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+          }
+          .print-label {
+            width: 260px;
+            border: 1px solid #111;
+            padding: 8px;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+          }
+          .print-text {
+            font-size: 12px;
+          }
+        }
+      `}</style>
+
+      <div id="print-area">
+        <div className="print-grid">
+          {equipment
+            .filter(item => selectedIds.includes(item.id))
+            .map(item => (
+              <div key={item.id} className="print-label">
+                <QRCodeCanvas value={buildQrPayload(item)} size={96} />
+                <div className="print-text">
+                  <div><strong>{item.name}</strong></div>
+                  <div>Serie: {item.serial_number || "-"}</div>
+                </div>
+              </div>
+            ))}
+        </div>
+      </div>
     </Layout>
   );
 };
 
 export default Inventory;
+
+
+

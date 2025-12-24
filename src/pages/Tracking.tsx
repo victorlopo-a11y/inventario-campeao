@@ -1,4 +1,5 @@
-﻿import { useState, useEffect } from "react";
+﻿
+import { useState, useEffect, useRef, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import Layout from "@/components/Layout";
 import StatusCard from "@/components/StatusCard";
@@ -11,7 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { Save, Trash2, FileDown, QrCode, Edit, History, Undo2 } from "lucide-react";
-
+import { useState, useEffect, useRef, useCallback } from "react";
 interface Equipment {
   id: string;
   name: string;
@@ -65,6 +66,15 @@ const Tracking = () => {
   const [statusFilter, setStatusFilter] = useState("all");
   const [historyDialogOpen, setHistoryDialogOpen] = useState(false);
   const [selectedHistoryEquipment, setSelectedHistoryEquipment] = useState<{ id: string; name: string } | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+  const [scannerOpen, setScannerOpen] = useState(false);
+  const [scannerError, setScannerError] = useState("");
+  const [destinationDialogOpen, setDestinationDialogOpen] = useState(false);
+  const [scannedEquipment, setScannedEquipment] = useState<Equipment | null>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const destinationRef = useRef<HTMLDivElement | null>(null);
+  const [highlightDestination, setHighlightDestination] = useState(false);
 
   // Edit state
   const [editingRecord, setEditingRecord] = useState<TrackingRecord | null>(null);
@@ -89,6 +99,174 @@ const Tracking = () => {
     fetchData();
     fetchCurrentUser();
   }, []);
+
+  const parseSerialFromQr = (rawValue: string) => {
+    const trimmed = rawValue.trim();
+    if (!trimmed) return "";
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (parsed && typeof parsed === "object") {
+        const candidate =
+          parsed.serial_number ||
+          parsed.serial ||
+          parsed.serialNumber ||
+          parsed.serial_no ||
+          parsed.numero_serie ||
+          parsed.numeroSerie;
+        if (typeof candidate === "string" && candidate.trim()) {
+          return candidate.trim();
+        }
+      }
+    } catch {
+      // not JSON, continue with raw value
+    }
+    const match = trimmed.match(/(serial|serie|serial_number|numero_serie)[:=]\s*(.+)/i);
+    if (match && match[2]) return match[2].trim();
+    return trimmed;
+  };
+
+  const prefillFromLatestTracking = useCallback(async (equipmentId: string) => {
+    const { data } = await supabase
+      .from("tracking")
+      .select("location_id, sector_id, responsible_person, delivered_by, received_by")
+      .eq("equipment_id", equipmentId)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (!data) return;
+
+    setSelectedLocation(prev => prev || data.location_id || "");
+    setSelectedSector(prev => prev || data.sector_id || "");
+    setResponsible(prev => prev || data.responsible_person || "");
+    setDeliveredBy(prev => prev || data.delivered_by || "");
+    setReceivedBy(prev => prev || data.received_by || "");
+  }, []);
+
+  const handleScanResult = useCallback(async (rawValue: string) => {
+    const serial = parseSerialFromQr(rawValue);
+    if (!serial) {
+      toast({ title: "Erro", description: "QR invalido ou vazio", variant: "destructive" });
+      return;
+    }
+
+    setSerialNumber(serial);
+    const match = equipment.find(e => (e.serial_number || "").toLowerCase() === serial.toLowerCase());
+    if (!match) {
+      toast({ title: "Nao encontrado", description: "Equipamento nao localizado para este serial", variant: "destructive" });
+      return;
+    }
+
+    setSelectedEquipment(match.id);
+    if (match.serial_number) setSerialNumber(match.serial_number);
+    setQuantity("1");
+    await prefillFromLatestTracking(match.id);
+    setScannedEquipment(match);
+    setDestinationDialogOpen(true);
+  }, [equipment, prefillFromLatestTracking, toast]);
+  const handleSerialSubmit = useCallback(async () => {
+    const value = serialNumber.trim();
+    if (!value) return;
+    await handleScanResult(value);
+  }, [serialNumber, handleScanResult]);
+
+  const handleDestinationMovimentacao = () => {
+    setStatus("saida");
+    setDestinationDialogOpen(false);
+    setTimeout(() => {
+      destinationRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      setHighlightDestination(true);
+      setTimeout(() => setHighlightDestination(false), 1800);
+    }, 100);
+    toast({ title: "Movimentacao", description: "Preencha o destino no formulario." });
+  };
+
+  const handleDestinationBaixa = () => {
+    if (!scannedEquipment) return;
+    const qty = parseInt(quantity) || 1;
+    setBaixaRecord({
+      id: `scan-${scannedEquipment.id}`,
+      equipment_id: scannedEquipment.id,
+      status: "saida",
+      quantity: qty,
+      entry_type: null,
+      location_id: null,
+      sector_id: null,
+      responsible_person: null,
+      delivered_by: null,
+      received_by: null,
+      created_at: new Date().toISOString(),
+      equipment: { name: scannedEquipment.name, serial_number: scannedEquipment.serial_number, image_url: null },
+      locations: null,
+      sectors: null,
+    });
+    setDestinationDialogOpen(false);
+    setBaixaDialogOpen(true);
+  };
+
+  useEffect(() => {
+    if (!scannerOpen) return;
+    let stream: MediaStream | null = null;
+    let rafId = 0;
+    let cancelled = false;
+    let handled = false;
+
+    const stop = () => {
+      if (rafId) cancelAnimationFrame(rafId);
+      if (stream) {
+        stream.getTracks().forEach(track => track.stop());
+      }
+    };
+
+    const start = async () => {
+      setScannerError("");
+      const BarcodeDetectorCtor = (window as any).BarcodeDetector;
+      if (!BarcodeDetectorCtor) {
+        setScannerError("Leitor de QR nao suportado neste navegador.");
+        return;
+      }
+      if (!navigator.mediaDevices?.getUserMedia) {
+        setScannerError("Camera nao suportada neste navegador.");
+        return;
+      }
+
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+        if (!videoRef.current) return;
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play();
+
+        const detector = new BarcodeDetectorCtor({ formats: ["qr_code"] });
+
+        const scan = async () => {
+          if (cancelled || handled || !videoRef.current) return;
+          try {
+            const barcodes = await detector.detect(videoRef.current);
+            if (barcodes.length > 0) {
+              handled = true;
+              setScannerOpen(false);
+              await handleScanResult(barcodes[0].rawValue);
+              return;
+            }
+          } catch {
+            // ignore detection errors
+          }
+          rafId = requestAnimationFrame(scan);
+        };
+
+        scan();
+      } catch {
+        setScannerError("Nao foi possivel acessar a camera.");
+      }
+    };
+
+    start();
+
+    return () => {
+      cancelled = true;
+      stop();
+    };
+  }, [scannerOpen, handleScanResult]);
 
   const getAvailableQuantity = async (equipmentId: string) => {
     const { data, error } = await supabase
@@ -146,9 +324,12 @@ const Tracking = () => {
       const fullName =
         (user.user_metadata as any)?.full_name ||
         (user.user_metadata as any)?.name ||
-        (user.user_metadata as any)?.fullName;
-      // Preenche automaticamente quem entregou com o nome (fallback para email se nao houver)
-      setDeliveredBy(prev => prev || fullName || user.email);
+        (user.user_metadata as any)?.fullName ||
+        (user.user_metadata as any)?.username ||
+        (user.user_metadata as any)?.user_name;
+      const emailPrefix = user.email.split("@")[0];
+      // Preenche automaticamente quem entregou com o nome (fallback para usuario/email se nao houver)
+      setDeliveredBy(prev => prev || fullName || emailPrefix || user.email);
     }
   };
 
@@ -386,6 +567,22 @@ const Tracking = () => {
     return matchesSearch && matchesStatus;
   });
 
+  const totalRecords = filteredRecords.length;
+  const totalPages = Math.max(1, Math.ceil(totalRecords / pageSize));
+  const startIndex = (currentPage - 1) * pageSize;
+  const endIndex = Math.min(startIndex + pageSize, totalRecords);
+  const pagedRecords = filteredRecords.slice(startIndex, endIndex);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, statusFilter, pageSize]);
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
+
   return (
     <Layout>
       <div className="space-y-6">
@@ -413,18 +610,27 @@ const Tracking = () => {
             </Select>
           </div>
 
-          <div className="space-y-2">
+                    <div className="space-y-2">
             <Label>Nº de Série</Label>
             <div className="flex gap-2">
               <Input
                 value={serialNumber}
                 onChange={e => setSerialNumber(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    handleSerialSubmit();
+                  }
+                }}
                 placeholder="Nº de Série"
               />
-              <Button variant="outline" size="icon">
+              <Button variant="outline" size="icon" onClick={() => setScannerOpen(true)}>
                 <QrCode className="h-4 w-4" />
               </Button>
             </div>
+            <p className="text-xs text-muted-foreground">
+              Leitor fisico: clique no campo e escaneie (Enter confirma).
+            </p>
           </div>
 
           <div className="space-y-2">
@@ -451,12 +657,14 @@ const Tracking = () => {
               min="1"
             />
           </div>
-
-          <div className="space-y-2">
-            <Label>Localização</Label>
+          <div
+            className={`space-y-2 rounded-md p-2 transition ${highlightDestination ? "ring-2 ring-blue-500" : ""}`}
+            ref={destinationRef}
+          >
+            <Label>Localizacao</Label>
             <Select value={selectedLocation} onValueChange={setSelectedLocation}>
               <SelectTrigger>
-                <SelectValue placeholder="Selecione uma localização" />
+                <SelectValue placeholder="Selecione uma localizacao" />
               </SelectTrigger>
               <SelectContent>
                 {locations.map(l => (
@@ -505,6 +713,67 @@ const Tracking = () => {
               onChange={e => setReceivedBy(e.target.value)}
               placeholder="Quem Recebeu"
             />
+          </div>
+          <div className="flex flex-col gap-3 border-t border-border p-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="text-sm text-muted-foreground">
+              Mostrando {totalRecords === 0 ? 0 : startIndex + 1} - {endIndex} de {totalRecords}
+            </div>
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="flex items-center gap-2">
+                <span className="text-sm">Por pagina</span>
+                <Select
+                  value={pageSize.toString()}
+                  onValueChange={(value) => setPageSize(parseInt(value))}
+                >
+                  <SelectTrigger className="h-8 w-24">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="10">10</SelectItem>
+                    <SelectItem value="25">25</SelectItem>
+                    <SelectItem value="50">50</SelectItem>
+                    <SelectItem value="100">100</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-muted-foreground">
+                  Pagina {currentPage} de {totalPages}
+                </span>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setCurrentPage(1)}
+                  disabled={currentPage === 1}
+                >
+                  Primeira
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                  disabled={currentPage === 1}
+                >
+                  Anterior
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                  disabled={currentPage === totalPages}
+                >
+                  Proxima
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setCurrentPage(totalPages)}
+                  disabled={currentPage === totalPages}
+                >
+                  Ultima
+                </Button>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -566,14 +835,14 @@ const Tracking = () => {
                 </tr>
               </thead>
               <tbody>
-                {filteredRecords.length === 0 ? (
+                {pagedRecords.length === 0 ? (
                   <tr>
                     <td colSpan={12} className="text-center py-8 text-muted-foreground">
                       Nenhum registro encontrado
                     </td>
                   </tr>
                 ) : (
-                  filteredRecords.map((record) => (
+                  pagedRecords.map((record) => (
                     <tr key={record.id} className="hover:bg-muted/50">
                       <td className="border border-border p-3">
                         {record.equipment.image_url ? (
@@ -661,6 +930,61 @@ const Tracking = () => {
           devolucao={statusCounts.devolucao} 
         />
       </div>
+
+      {/* QR Scanner Dialog */}
+      <Dialog open={scannerOpen} onOpenChange={setScannerOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Leitor de QR</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="aspect-video overflow-hidden rounded bg-black/80">
+              <video ref={videoRef} className="h-full w-full object-cover" muted playsInline />
+            </div>
+            {scannerError ? (
+              <p className="text-sm text-destructive">{scannerError} Use o leitor fisico no campo de numero de serie.</p>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                Aponte a camera para o QR do equipamento.
+              </p>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Destination Dialog */}
+      <Dialog open={destinationDialogOpen} onOpenChange={setDestinationDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Destino do aparelho</DialogTitle>
+          </DialogHeader>
+          {scannedEquipment ? (
+            <div className="space-y-4">
+              <div className="rounded bg-muted p-3">
+                <p className="font-medium">{scannedEquipment.name}</p>
+                <p className="text-sm text-muted-foreground">
+                  Numero de serie: {scannedEquipment.serial_number || "-"}
+                </p>
+              </div>
+              <div className="flex flex-col gap-2">
+                <Button onClick={handleDestinationMovimentacao}>
+                  Movimentacao para outra linha
+                </Button>
+                <Button variant="outline" onClick={handleDestinationBaixa}>
+                  Dar baixa
+                </Button>
+                <Button variant="secondary" onClick={() => setDestinationDialogOpen(false)}>
+                  Cancelar
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              Nenhum equipamento selecionado.
+            </p>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* Equipment History Dialog */}
       {selectedHistoryEquipment && (
@@ -837,4 +1161,10 @@ const Tracking = () => {
 };
 
 export default Tracking;
+
+
+
+
+
+
 

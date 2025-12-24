@@ -28,7 +28,7 @@ interface MovementData {
   created_at: string;
   status: string;
   quantity: number;
-  responsible_person: string;
+  responsible_person: string | null;
   equipment: { name: string };
   sectors: { name: string } | null;
   locations: { name: string } | null;
@@ -36,6 +36,12 @@ interface MovementData {
 
 interface ChartData {
   name: string;
+  quantidade: number;
+}
+
+interface ResponsibleBySector {
+  sector: string;
+  responsible: string;
   quantidade: number;
 }
 
@@ -56,6 +62,7 @@ const Reports = () => {
   const [sectorData, setSectorData] = useState<ChartData[]>([]);
   const [locationData, setLocationData] = useState<ChartData[]>([]);
   const [statusData, setStatusData] = useState<ChartData[]>([]);
+  const [topResponsibleBySector, setTopResponsibleBySector] = useState<ResponsibleBySector[]>([]);
 
   useEffect(() => {
     fetchSectors();
@@ -159,6 +166,34 @@ const Reports = () => {
       quantidade,
     }));
     setStatusData(statusChart);
+
+    // Responsavel que mais solicitou por setor (considera apenas saida)
+    const sectorResponsibleMap = new Map<string, Map<string, number>>();
+    data.forEach((item) => {
+      if (item.status !== "saida") return;
+      const sectorName = item.sectors?.name || "Sem setor";
+      const responsibleName = item.responsible_person || "Nao informado";
+      if (!sectorResponsibleMap.has(sectorName)) {
+        sectorResponsibleMap.set(sectorName, new Map());
+      }
+      const responsibleMap = sectorResponsibleMap.get(sectorName)!;
+      responsibleMap.set(responsibleName, (responsibleMap.get(responsibleName) || 0) + item.quantity);
+    });
+
+    const topBySector: ResponsibleBySector[] = Array.from(sectorResponsibleMap.entries())
+      .map(([sector, responsibleMap]) => {
+        let topResponsible = "Nao informado";
+        let topQty = 0;
+        responsibleMap.forEach((qty, responsible) => {
+          if (qty > topQty) {
+            topQty = qty;
+            topResponsible = responsible;
+          }
+        });
+        return { sector, responsible: topResponsible, quantidade: topQty };
+      })
+      .sort((a, b) => b.quantidade - a.quantidade);
+    setTopResponsibleBySector(topBySector);
   };
 
   const exportToPDF = () => {
@@ -235,6 +270,22 @@ const Reports = () => {
         resumeY = 20;
       }
     });
+
+    if (topResponsibleBySector.length > 0) {
+      resumeY += 10;
+      doc.setFontSize(14);
+      doc.text("Responsavel que mais solicitou por setor (saida)", 14, resumeY);
+      resumeY += 10;
+      topResponsibleBySector.forEach((item) => {
+        doc.setFontSize(10);
+        doc.text(`${item.sector}: ${item.responsible} (${item.quantidade})`, 14, resumeY);
+        resumeY += 6;
+        if (resumeY > 280) {
+          doc.addPage();
+          resumeY = 20;
+        }
+      });
+    }
 
     doc.save(`relatorio-movimentacoes-${format(new Date(), "dd-MM-yyyy")}.pdf`);
     
@@ -391,6 +442,40 @@ const Reports = () => {
                     <Tooltip />
                   </PieChart>
                 </ResponsiveContainer>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Responsavel que mais solicitou por setor (saida)</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {topResponsibleBySector.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    Nenhuma saida encontrada no periodo selecionado.
+                  </p>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full">
+                      <thead>
+                        <tr className="border-b">
+                          <th className="text-left p-2">Setor</th>
+                          <th className="text-left p-2">Responsavel</th>
+                          <th className="text-left p-2">Quantidade</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {topResponsibleBySector.map((item) => (
+                          <tr key={`${item.sector}-${item.responsible}`} className="border-b">
+                            <td className="p-2">{item.sector}</td>
+                            <td className="p-2">{item.responsible}</td>
+                            <td className="p-2">{item.quantidade}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </CardContent>
             </Card>
 

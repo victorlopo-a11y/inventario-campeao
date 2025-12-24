@@ -1,4 +1,4 @@
-import { ReactNode, useEffect, useState } from "react";
+﻿import { ReactNode, useEffect, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -16,7 +16,21 @@ const Layout = ({ children }: LayoutProps) => {
   const location = useLocation();
   const { toast } = useToast();
   const { canEdit } = useUserRole();
-  const [darkMode, setDarkMode] = useState(false);
+  const [darkMode, setDarkMode] = useState(() => {
+    if (typeof window === "undefined") {
+      return false;
+    }
+
+    const storedTheme = window.localStorage.getItem("theme");
+    if (storedTheme === "dark") {
+      return true;
+    }
+    if (storedTheme === "light") {
+      return false;
+    }
+
+    return window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? false;
+  });
   const [currentUserName, setCurrentUserName] = useState<string>("");
 
   const setNameFromSession = (session: any) => {
@@ -58,6 +72,9 @@ const Layout = ({ children }: LayoutProps) => {
     } else {
       document.documentElement.classList.remove("dark");
     }
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem("theme", darkMode ? "dark" : "light");
+    }
   }, [darkMode]);
 
   const handleLogout = async () => {
@@ -77,12 +94,12 @@ const Layout = ({ children }: LayoutProps) => {
     <div className="min-h-screen bg-background">
       <div className="max-w-7xl mx-auto p-4">
         {currentUserName && (
-          <div className="mb-2 text-right text-sm font-medium text-foreground">
+          <div className="mb-2 text-right text-sm font-medium text-foreground print-hide">
             Olá, {currentUserName}
           </div>
         )}
         {/* Header com botões */}
-        <div className="grid grid-cols-2 gap-3 mb-4">
+        <div className="grid grid-cols-2 gap-3 mb-4 print-hide">
           <Button
             onClick={handleLogout}
             className="bg-danger hover:bg-danger/90 text-danger-foreground w-full py-6 text-base font-medium"
@@ -103,7 +120,7 @@ const Layout = ({ children }: LayoutProps) => {
         </div>
 
         {/* Navigation Tabs */}
-        <div className="grid grid-cols-3 gap-3 mb-6">
+        <div className="grid grid-cols-3 gap-3 mb-6 print-hide">
           <Button
             onClick={() => navigate("/")}
             variant={isTrackingPage ? "default" : "secondary"}
@@ -135,3 +152,4 @@ const Layout = ({ children }: LayoutProps) => {
 };
 
 export default Layout;
+
