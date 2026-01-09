@@ -12,11 +12,16 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { Save, Trash2, FileDown, QrCode, Edit, History, Undo2 } from "lucide-react";
-import { useState, useEffect, useRef, useCallback } from "react";
 interface Equipment {
   id: string;
   name: string;
   serial_number: string | null;
+  category_id: string | null;
+}
+
+interface Category {
+  id: string;
+  name: string;
 }
 
 interface Location {
@@ -46,10 +51,16 @@ interface TrackingRecord {
   sectors: { name: string } | null;
 }
 
+interface ChecklistItem {
+  equipment: Equipment;
+  quantity: number;
+}
+
 const Tracking = () => {
   const { toast } = useToast();
   const [equipment, setEquipment] = useState<Equipment[]>([]);
   const [locations, setLocations] = useState<Location[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
   const [sectors, setSectors] = useState<Sector[]>([]);
   const [trackingRecords, setTrackingRecords] = useState<TrackingRecord[]>([]);
   
@@ -94,6 +105,12 @@ const Tracking = () => {
   const [baixaResponsible, setBaixaResponsible] = useState("");
   const [baixaNotes, setBaixaNotes] = useState("");
   const [currentUserEmail, setCurrentUserEmail] = useState("");
+  const [currentUserId, setCurrentUserId] = useState("");
+
+  const [checklistLocation, setChecklistLocation] = useState("");
+  const [checklistLeader, setChecklistLeader] = useState("");
+  const [checklistItems, setChecklistItems] = useState<ChecklistItem[]>([]);
+  const [checklistSaving, setChecklistSaving] = useState(false);
 
   useEffect(() => {
     fetchData();
@@ -319,6 +336,9 @@ const Tracking = () => {
 
   const fetchCurrentUser = async () => {
     const { data: { user } } = await supabase.auth.getUser();
+    if (user) {
+      setCurrentUserId(user.id);
+    }
     if (user?.email) {
       setCurrentUserEmail(user.email);
       const fullName =
@@ -334,10 +354,11 @@ const Tracking = () => {
   };
 
   const fetchData = async () => {
-    const [equipRes, locRes, secRes, trackRes] = await Promise.all([
+    const [equipRes, locRes, secRes, catRes, trackRes] = await Promise.all([
       supabase.from("equipment").select("*"),
       supabase.from("locations").select("*"),
       supabase.from("sectors").select("*"),
+      supabase.from("categories").select("*"),
       supabase.from("tracking").select(`
         *,
         equipment:equipment_id(name, serial_number, image_url),
@@ -349,7 +370,98 @@ const Tracking = () => {
     if (equipRes.data) setEquipment(equipRes.data);
     if (locRes.data) setLocations(locRes.data);
     if (secRes.data) setSectors(secRes.data);
+    if (catRes.data) setCategories(catRes.data);
     if (trackRes.data) setTrackingRecords(trackRes.data as any);
+  };
+
+  const getCategoryName = (categoryId: string | null) => {
+    if (!categoryId) return "";
+    const category = categories.find(item => item.id === categoryId);
+    return category?.name || "";
+  };
+
+  const isParafusadeira = (item: Equipment) => {
+    const categoryName = getCategoryName(item.category_id).toLowerCase();
+    if (categoryName.includes("parafus")) return true;
+    return item.name.toLowerCase().includes("parafus");
+  };
+
+  const buildChecklistItems = (locationId: string) => {
+    const latestByEquipment = new Map<string, TrackingRecord>();
+    trackingRecords.forEach(record => {
+      if (!latestByEquipment.has(record.equipment_id)) {
+        latestByEquipment.set(record.equipment_id, record);
+      }
+    });
+
+    const items: ChecklistItem[] = [];
+    equipment.forEach(item => {
+      if (!isParafusadeira(item)) return;
+      const latest = latestByEquipment.get(item.id);
+      if (!latest) return;
+      if (latest.status !== "saida") return;
+      if (!latest.location_id || latest.location_id !== locationId) return;
+      items.push({ equipment: item, quantity: latest.quantity });
+    });
+
+    return items;
+  };
+
+  const handleChecklistGenerate = () => {
+    if (!checklistLocation) {
+      toast({ title: "Erro", description: "Selecione a linha do setup", variant: "destructive" });
+      return;
+    }
+    const items = buildChecklistItems(checklistLocation);
+    setChecklistItems(items);
+    if (items.length === 0) {
+      toast({ title: "Aviso", description: "Nenhuma parafusadeira encontrada nessa linha." });
+    }
+  };
+
+  const handleChecklistConfirm = async () => {
+    if (!checklistLocation) {
+      toast({ title: "Erro", description: "Selecione a linha do setup", variant: "destructive" });
+      return;
+    }
+    if (!checklistLeader.trim()) {
+      toast({ title: "Erro", description: "Informe o nome do lider", variant: "destructive" });
+      return;
+    }
+    if (checklistItems.length === 0) {
+      toast({ title: "Erro", description: "Gere o checklist antes de confirmar", variant: "destructive" });
+      return;
+    }
+
+    const payloadItems = checklistItems.map(item => ({
+      equipment_id: item.equipment.id,
+      name: item.equipment.name,
+      serial_number: item.equipment.serial_number,
+      quantity: item.quantity,
+    }));
+    const totalQuantity = checklistItems.reduce((sum, item) => sum + item.quantity, 0);
+
+    setChecklistSaving(true);
+    try {
+      const { error } = await (supabase as any)
+        .from("setup_checklists")
+        .insert({
+          location_id: checklistLocation,
+          leader_name: checklistLeader.trim(),
+          created_by: currentUserId || null,
+          items: payloadItems,
+          total_quantity: totalQuantity,
+        });
+
+      if (error) throw error;
+      toast({ title: "Sucesso", description: "Checklist registrado." });
+      setChecklistLeader("");
+      setChecklistItems([]);
+    } catch (error: any) {
+      toast({ title: "Erro", description: error.message, variant: "destructive" });
+    } finally {
+      setChecklistSaving(false);
+    }
   };
 
   const handleSave = async () => {
@@ -560,6 +672,7 @@ const Tracking = () => {
     danificado: trackingRecords.filter(r => r.status === "danificado").length,
     devolucao: trackingRecords.filter(r => r.status === "devolucao").length,
   };
+  const checklistTotalQuantity = checklistItems.reduce((sum, item) => sum + item.quantity, 0);
 
   const filteredRecords = trackingRecords.filter(record => {
     const matchesSearch = record.equipment.name.toLowerCase().includes(searchQuery.toLowerCase());
@@ -594,6 +707,83 @@ const Tracking = () => {
           <StatusCard label="Em manutenção" count={statusCounts.manutencao} variant="warning" />
           <StatusCard label="Danificado" count={statusCounts.danificado} variant="danger" />
           <StatusCard label="Devolução" count={statusCounts.devolucao} variant="success" />
+        </div>
+        <div className="rounded-lg border border-border bg-card p-4 space-y-4">
+          <div className="space-y-1">
+            <h2 className="text-lg font-semibold">Checklist de setup - Parafusadeiras</h2>
+            <p className="text-sm text-muted-foreground">
+              Gera a lista das parafusadeiras registradas na linha selecionada.
+            </p>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="space-y-2">
+              <Label>Linha</Label>
+              <Select value={checklistLocation} onValueChange={setChecklistLocation}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Selecione a linha" />
+                </SelectTrigger>
+                <SelectContent>
+                  {locations.map(l => (
+                    <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Nome do lider</Label>
+              <Input
+                value={checklistLeader}
+                onChange={e => setChecklistLeader(e.target.value)}
+                placeholder="Nome do lider"
+              />
+            </div>
+            <div className="flex items-end">
+              <Button onClick={handleChecklistGenerate} variant="secondary" className="w-full">
+                Gerar checklist
+              </Button>
+            </div>
+          </div>
+          <div className="rounded-md border border-border p-3">
+            {checklistItems.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                Nenhuma parafusadeira listada.
+              </p>
+            ) : (
+              <div className="space-y-2">
+                <div className="text-sm text-muted-foreground">
+                  Total de parafusadeiras: {checklistTotalQuantity}
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full border-collapse">
+                    <thead>
+                      <tr className="bg-muted text-sm">
+                        <th className="border border-border p-2 text-left">Equipamento</th>
+                        <th className="border border-border p-2 text-left">N§ de Serie</th>
+                        <th className="border border-border p-2 text-left">Quantidade</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {checklistItems.map(item => (
+                        <tr key={item.equipment.id}>
+                          <td className="border border-border p-2">{item.equipment.name}</td>
+                          <td className="border border-border p-2">{item.equipment.serial_number || "-"}</td>
+                          <td className="border border-border p-2">{item.quantity}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+          <div className="flex justify-end">
+            <Button
+              onClick={handleChecklistConfirm}
+              disabled={checklistSaving || checklistItems.length === 0}
+            >
+              {checklistSaving ? "Salvando..." : "Confirmar checklist"}
+            </Button>
+          </div>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           <div className="space-y-2">
