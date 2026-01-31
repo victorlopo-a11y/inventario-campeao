@@ -32,9 +32,40 @@ export type Database = {
         }
         Relationships: []
       }
+      bins: {
+        Row: {
+          aisle: string | null
+          code: string
+          created_at: string
+          id: string
+          notes: string | null
+          shelf: string | null
+          side: string | null
+        }
+        Insert: {
+          aisle?: string | null
+          code: string
+          created_at?: string
+          id?: string
+          notes?: string | null
+          shelf?: string | null
+          side?: string | null
+        }
+        Update: {
+          aisle?: string | null
+          code?: string
+          created_at?: string
+          id?: string
+          notes?: string | null
+          shelf?: string | null
+          side?: string | null
+        }
+        Relationships: []
+      }
       equipment: {
         Row: {
           available_quantity: number
+          bin_id: string | null
           category_id: string | null
           created_at: string
           created_by: string | null
@@ -48,6 +79,7 @@ export type Database = {
         }
         Insert: {
           available_quantity?: number
+          bin_id?: string | null
           category_id?: string | null
           created_at?: string
           created_by?: string | null
@@ -61,6 +93,7 @@ export type Database = {
         }
         Update: {
           available_quantity?: number
+          bin_id?: string | null
           category_id?: string | null
           created_at?: string
           created_by?: string | null
@@ -73,6 +106,13 @@ export type Database = {
           updated_by?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "equipment_bin_id_fkey"
+            columns: ["bin_id"]
+            isOneToOne: false
+            referencedRelation: "bins"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "equipment_category_id_fkey"
             columns: ["category_id"]

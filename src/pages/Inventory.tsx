@@ -23,14 +23,25 @@ interface Category {
   name: string;
 }
 
+interface Bin {
+  id: string;
+  code: string;
+  aisle: string | null;
+  side: string | null;
+  shelf: string | null;
+  notes: string | null;
+}
+
 interface EquipmentData {
   id: string;
   name: string;
   serial_number: string | null;
   category_id: string | null;
+  bin_id: string | null;
   available_quantity: number;
   description: string | null;
   image_url: string | null;
+  bins: Bin | null;
   categories: { name: string } | null;
 }
 
@@ -38,12 +49,14 @@ const Inventory = () => {
   const { toast } = useToast();
   const { canEdit, isAdmin, loading: roleLoading } = useUserRole();
   const [categories, setCategories] = useState<Category[]>([]);
+  const [bins, setBins] = useState<Bin[]>([]);
   const [equipment, setEquipment] = useState<EquipmentData[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
   
   const [name, setName] = useState("");
   const [serialNumber, setSerialNumber] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("");
+  const [selectedBinId, setSelectedBinId] = useState("");
   const [quantity, setQuantity] = useState("0");
   const [description, setDescription] = useState("");
   const [imageUrl, setImageUrl] = useState<string | null>(null);
@@ -56,19 +69,40 @@ const Inventory = () => {
   const [qrDialogOpen, setQrDialogOpen] = useState(false);
   const [qrPayload, setQrPayload] = useState("");
   const [qrLabel, setQrLabel] = useState("");
+  const [binDialogOpen, setBinDialogOpen] = useState(false);
+  const [binCode, setBinCode] = useState("");
+  const [binAisle, setBinAisle] = useState("");
+  const [binSide, setBinSide] = useState("");
+  const [binShelf, setBinShelf] = useState("");
+  const [binNotes, setBinNotes] = useState("");
+  const [savingBin, setSavingBin] = useState(false);
 
   useEffect(() => {
     fetchData();
   }, []);
 
+  const formatBinLabel = (bin: Bin | null) => {
+    if (!bin) return "-";
+    const parts = [
+      bin.code,
+      bin.aisle ? `Rua ${bin.aisle}` : "",
+      bin.side ? `Lado ${bin.side}` : "",
+      bin.shelf ? `Prateleira ${bin.shelf}` : "",
+    ].filter(Boolean);
+    return parts.join(" - ");
+  };
+
   const buildQrPayload = (equip: EquipmentData) => {
     const categoryName = categories.find(c => c.id === equip.category_id)?.name || "";
+    const binLabel = formatBinLabel(equip.bins);
     const payload = {
       id: equip.id,
       name: equip.name,
       serial_number: equip.serial_number || equip.id,
       category_id: equip.category_id,
       category_name: categoryName,
+      bin_id: equip.bin_id,
+      bin_label: binLabel,
       available_quantity: equip.available_quantity,
       description: equip.description,
       image_url: equip.image_url,
@@ -113,15 +147,18 @@ const Inventory = () => {
   };
 
   const fetchData = async () => {
-    const [catRes, equipRes] = await Promise.all([
+    const [catRes, binRes, equipRes] = await Promise.all([
       supabase.from("categories").select("*"),
+      supabase.from("bins").select("*").order("code"),
       supabase.from("equipment").select(`
         *,
-        categories:category_id(name)
+        categories:category_id(name),
+        bins:bin_id(code, aisle, side, shelf, notes)
       `).order("created_at", { ascending: false }),
     ]);
 
     if (catRes.data) setCategories(catRes.data);
+    if (binRes.data) setBins(binRes.data);
     if (equipRes.data) setEquipment(equipRes.data as any);
   };
 
@@ -160,6 +197,60 @@ const Inventory = () => {
     }
   };
 
+  const resetBinForm = () => {
+    setBinCode("");
+    setBinAisle("");
+    setBinSide("");
+    setBinShelf("");
+    setBinNotes("");
+  };
+
+  const handleCreateBin = async () => {
+    if (!canEdit) {
+      toast({ title: "Erro", description: "Você não tem permissão para cadastrar bin", variant: "destructive" });
+      return;
+    }
+
+    if (!binCode.trim()) {
+      toast({ title: "Erro", description: "Informe o código do bin", variant: "destructive" });
+      return;
+    }
+
+    setSavingBin(true);
+    const payload = {
+      code: binCode.trim(),
+      aisle: binAisle.trim() || null,
+      side: binSide.trim() || null,
+      shelf: binShelf.trim() || null,
+      notes: binNotes.trim() || null,
+    };
+
+    const { data, error } = await supabase
+      .from("bins")
+      .insert(payload)
+      .select("*")
+      .single();
+
+    setSavingBin(false);
+
+    if (error) {
+      if (error.code === "23505") {
+        toast({ title: "Erro", description: "Este código de bin já está cadastrado", variant: "destructive" });
+      } else {
+        toast({ title: "Erro", description: error.message, variant: "destructive" });
+      }
+      return;
+    }
+
+    if (data) {
+      setSelectedBinId(data.id);
+    }
+    resetBinForm();
+    setBinDialogOpen(false);
+    fetchData();
+    toast({ title: "Sucesso", description: "Bin cadastrado!" });
+  };
+
   const handleSave = async () => {
     if (!canEdit) {
       toast({ title: "Erro", description: "Você não tem permissão para editar", variant: "destructive" });
@@ -171,12 +262,18 @@ const Inventory = () => {
       return;
     }
 
+    if (!selectedBinId) {
+      toast({ title: "Erro", description: "Selecione um bin para o equipamento", variant: "destructive" });
+      return;
+    }
+
     const { data: { user } } = await supabase.auth.getUser();
     
     const data = {
       name,
       serial_number: serialNumber || null,
       category_id: selectedCategory || null,
+      bin_id: selectedBinId || null,
       available_quantity: parseInt(quantity),
       description: description || null,
       image_url: imageUrl,
@@ -220,6 +317,7 @@ const Inventory = () => {
     setName("");
     setSerialNumber("");
     setSelectedCategory("");
+    setSelectedBinId("");
     setQuantity("0");
     setDescription("");
     setImageUrl(null);
@@ -239,6 +337,7 @@ const Inventory = () => {
     setName(equip.name);
     setSerialNumber(equip.serial_number || "");
     setSelectedCategory(equip.category_id || "");
+    setSelectedBinId(equip.bin_id || "");
     setQuantity(equip.available_quantity.toString());
     setDescription(equip.description || "");
     setImageUrl(equip.image_url);
@@ -264,11 +363,12 @@ const Inventory = () => {
   };
 
   const handleExportCSV = () => {
-    const headers = ["Nome", "Nº de Série", "Categoria", "Quantidade Disponível", "Descrição"];
+    const headers = ["Nome", "Nº de Série", "Categoria", "Bin/Localização", "Quantidade Disponível", "Descrição"];
     const rows = filteredEquipment.map(e => [
       e.name,
       e.serial_number || "",
       e.categories?.name || "",
+      formatBinLabel(e.bins),
       e.available_quantity,
       e.description || "",
     ]);
@@ -349,6 +449,34 @@ const Inventory = () => {
                 ))}
               </SelectContent>
             </Select>
+          </div>
+
+          <div className="space-y-2 md:col-span-2">
+            <Label>Bin</Label>
+            <Select value={selectedBinId} onValueChange={setSelectedBinId} disabled={!canEdit}>
+              <SelectTrigger>
+                <SelectValue placeholder="Selecione um bin" />
+              </SelectTrigger>
+              <SelectContent>
+                {bins.map(bin => (
+                  <SelectItem key={bin.id} value={bin.id}>
+                    {formatBinLabel(bin)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-2 md:col-span-2 flex items-end">
+            <Button
+              type="button"
+              variant="secondary"
+              className="w-full"
+              onClick={() => setBinDialogOpen(true)}
+              disabled={!canEdit}
+            >
+              Cadastrar bin
+            </Button>
           </div>
 
           <div className="space-y-2">
@@ -484,6 +612,7 @@ const Inventory = () => {
                 <TableHead className="text-white border border-[#4a5568]">Nº de Série</TableHead>
                 <TableHead className="text-white border border-[#4a5568]">Categoria</TableHead>
                 <TableHead className="text-white border border-[#4a5568]">Quantidade Disponível</TableHead>
+                <TableHead className="text-white border border-[#4a5568]">Bin/Localização</TableHead>
                 <TableHead className="text-white border border-[#4a5568]">Descrição</TableHead>
                 <TableHead className="text-white border border-[#4a5568] text-center">Ações</TableHead>
               </TableRow>
@@ -518,6 +647,7 @@ const Inventory = () => {
                       )}
                     </div>
                   </TableCell>
+                  <TableCell className="border">{formatBinLabel(equip.bins)}</TableCell>
                   <TableCell className="border">{equip.description || "-"}</TableCell>
                   <TableCell className="border">
                     <div className="flex flex-col gap-2">
@@ -588,6 +718,70 @@ const Inventory = () => {
         </DialogContent>
       </Dialog>
 
+      <Dialog
+        open={binDialogOpen}
+        onOpenChange={(open) => {
+          setBinDialogOpen(open);
+          if (!open) resetBinForm();
+        }}
+      >
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Novo bin</DialogTitle>
+          </DialogHeader>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label>Código</Label>
+              <Input
+                value={binCode}
+                onChange={e => setBinCode(e.target.value)}
+                placeholder="Ex: BIN09"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Rua</Label>
+              <Input
+                value={binAisle}
+                onChange={e => setBinAisle(e.target.value)}
+                placeholder="Ex: 1"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Lado</Label>
+              <Input
+                value={binSide}
+                onChange={e => setBinSide(e.target.value)}
+                placeholder="Ex: direito"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Prateleira</Label>
+              <Input
+                value={binShelf}
+                onChange={e => setBinShelf(e.target.value)}
+                placeholder="Ex: A"
+              />
+            </div>
+            <div className="space-y-2 md:col-span-2">
+              <Label>Observação (opcional)</Label>
+              <Input
+                value={binNotes}
+                onChange={e => setBinNotes(e.target.value)}
+                placeholder="Ex: Materiais pequenos"
+              />
+            </div>
+          </div>
+          <div className="flex gap-2 pt-2">
+            <Button variant="secondary" className="w-full" onClick={() => setBinDialogOpen(false)}>
+              Cancelar
+            </Button>
+            <Button className="w-full" onClick={handleCreateBin} disabled={savingBin}>
+              {savingBin ? "Salvando..." : "Salvar bin"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       <style>{`
         @media screen {
           #print-area {
@@ -636,6 +830,7 @@ const Inventory = () => {
                 <div className="print-text">
                   <div><strong>{item.name}</strong></div>
                   <div>Serie: {item.serial_number || "-"}</div>
+                  <div>Local: {formatBinLabel(item.bins)}</div>
                 </div>
               </div>
             ))}
